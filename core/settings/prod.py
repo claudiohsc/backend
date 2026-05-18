@@ -16,14 +16,6 @@ CORS_ALLOWED_ORIGINS = []
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 SECURE_SSL_REDIRECT = True
 
-
-# Application definition
-
-INSTALLED_APPS.insert(0, "whitenoise.runserver_nostatic")
-
-MIDDLEWARE.insert(1, "whitenoise.middleware.WhiteNoiseMiddleware")
-
-
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
