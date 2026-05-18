@@ -1,5 +1,11 @@
-django==5.0.4
+django==4.2.30
 psycopg2-binary==2.9.9
-python-dotenv==1.0.1
+python-decouple==3.8
 dj-database-url==2.1.0
 gunicorn==22.0.0
+djangorestframework==3.16.1
+djangorestframework-simplejwt==5.5.1
+google-auth==2.38.0
+requests==2.31.0
+django-cors-headers==4.9.0
+whitenoise==6.5.0
