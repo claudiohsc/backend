@@ -7,6 +7,12 @@ from drf_spectacular.utils import (
     extend_schema,
     extend_schema_view,
 )
+from .serializers import (
+    GoogleAuthSerializer,
+    LogoutInputSerializer,
+    TokenRefreshInputSerializer,
+    UserSerializer,
+)
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -192,7 +198,7 @@ class TokenRefreshView(APIView):
             "O `refresh` token tem validade de **7 dias**. O `access` token gerado tem validade de **1 hora**.\n\n"
             "> ⚠️ Com `ROTATE_REFRESH_TOKENS = True`, o refresh token antigo é invalidado e um novo é gerado."
         ),
-        request=None,
+        request=TokenRefreshInputSerializer,
         responses={
             200: OpenApiResponse(
                 description="Novo access token gerado",
@@ -250,7 +256,7 @@ class LogoutView(APIView):
             "O token é adicionado à **blacklist** do SimpleJWT e não pode mais ser usado.\n\n"
             "**Requer:** `Authorization: Bearer <access_token>` no header."
         ),
-        request=None,
+        request=LogoutInputSerializer,
         responses={
             200: OpenApiResponse(
                 description="Sessão terminada",

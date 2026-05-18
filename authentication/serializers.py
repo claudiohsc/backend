@@ -3,11 +3,8 @@ from .models import User
 
 
 class UserSerializer(serializers.ModelSerializer):
-    """
-    Serializer completo do utilizador para respostas da API.
-    Expõe os campos relevantes sem dados sensíveis.
-    """
-
+    """Serializer completo do utilizador para respostas da API."""
+ 
     class Meta:
         model = User
         fields = [
@@ -20,35 +17,43 @@ class UserSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = fields
-
-
+ 
+ 
 class GoogleAuthSerializer(serializers.Serializer):
-    """
-    Serializer para validar o payload enviado pelo frontend no login com Google.
-    O frontend deve enviar o id_token retornado pelo Google Sign-In.
-    """
-
+    """Valida o payload de login com Google."""
+ 
     id_token = serializers.CharField(
         required=True,
         help_text="Token de ID retornado pelo Google Sign-In (credencial JWT).",
     )
-
-
+ 
+ 
 class AuthResponseSerializer(serializers.Serializer):
-    """
-    Serializer de documentação para a resposta do endpoint de autenticação.
-    Não usado diretamente, mas serve como contrato da API para o frontend.
-
-    Resposta esperada:
-    {
-        "access": "<JWT access token>",
-        "refresh": "<JWT refresh token>",
-        "user": { ...UserSerializer fields... },
-        "is_new_user": true/false
-    }
-    """
-
+    """Contrato da resposta do endpoint de autenticação (documentação)."""
+ 
     access = serializers.CharField(read_only=True)
     refresh = serializers.CharField(read_only=True)
     user = UserSerializer(read_only=True)
     is_new_user = serializers.BooleanField(read_only=True)
+
+class TokenRefreshInputSerializer(serializers.Serializer):
+ 
+    refresh = serializers.CharField(
+        required=True,
+        help_text=(
+            "Refresh token JWT obtido no login. "
+            "Válido por 7 dias. "
+            "Após uso, o token antigo é invalidado e um novo é emitido (rotation)."
+        ),
+    )
+ 
+ 
+class LogoutInputSerializer(serializers.Serializer):
+ 
+    refresh = serializers.CharField(
+        required=True,
+        help_text=(
+            "Refresh token JWT a invalidar. "
+            "Após este pedido, o token fica na blacklist e não pode mais ser usado."
+        ),
+    )
