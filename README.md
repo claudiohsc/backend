@@ -69,7 +69,7 @@ python manage.py migrate
 4. Crie o superusuário com base nas variáveis de ambiente:
 
 ```bash
-python manage.py initadmin --noinput
+python manage.py initadmin
 ```
 
 5. Inicie o servidor:

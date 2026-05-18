@@ -1,6 +1,12 @@
 import logging
 
 from django.contrib.auth import get_user_model
+from drf_spectacular.utils import (
+    OpenApiExample,
+    OpenApiResponse,
+    extend_schema,
+    extend_schema_view,
+)
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -15,65 +21,122 @@ User = get_user_model()
 
 
 def get_tokens_for_user(user) -> dict:
-    """
-    Gera um par de tokens JWT (access + refresh) para o utilizador.
-    Usado após autenticação bem-sucedida.
-    """
+    """Gera um par de tokens JWT (access + refresh) para o utilizador."""
     refresh = RefreshToken.for_user(user)
     return {
         "refresh": str(refresh),
         "access": str(refresh.access_token),
     }
 
+_AUTH_SUCCESS_EXAMPLE_NEW = OpenApiExample(
+    name="Novo utilizador (201)",
+    summary="Primeiro login — conta criada",
+    value={
+        "access": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+        "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+        "is_new_user": True,
+        "user": {
+            "id": 1,
+            "email": "user@gmail.com",
+            "name": "Nome Completo",
+            "avatar_url": "https://lh3.googleusercontent.com/...",
+            "is_new_user": True,
+            "created_at": "2024-01-01T12:00:00Z",
+            "updated_at": "2024-01-01T12:00:00Z",
+        },
+    },
+    response_only=True,
+    status_codes=["201"],
+)
+
+_AUTH_SUCCESS_EXAMPLE_EXISTING = OpenApiExample(
+    name="Utilizador existente (200)",
+    summary="Login recorrente",
+    value={
+        "access": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+        "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+        "is_new_user": False,
+        "user": {
+            "id": 1,
+            "email": "user@gmail.com",
+            "name": "Nome Completo",
+            "avatar_url": "https://lh3.googleusercontent.com/...",
+            "is_new_user": False,
+            "created_at": "2024-01-01T12:00:00Z",
+            "updated_at": "2024-01-15T08:30:00Z",
+        },
+    },
+    response_only=True,
+    status_codes=["200"],
+)
+
+
+# ─── Views ────────────────────────────────────────────────────────────────────
 
 class GoogleLoginView(APIView):
-    """
-    Endpoint de autenticação com Google OAuth 2.0.
-
-    Recebe o `id_token` do Google Sign-In (enviado pelo frontend),
-    verifica junto ao Google, e cria ou autentica o utilizador.
-
-    POST /api/auth/google/
-
-    Request Body:
-        {
-            "id_token": "<token JWT retornado pelo Google>"
-        }
-
-    Response (200 OK - utilizador existente):
-        {
-            "access": "<JWT>",
-            "refresh": "<JWT>",
-            "is_new_user": false,
-            "user": {
-                "id": 1,
-                "email": "user@example.com",
-                "name": "Nome Completo",
-                "avatar_url": "https://...",
-                "is_new_user": false,
-                "created_at": "...",
-                "updated_at": "..."
-            }
-        }
-
-    Response (201 Created - novo utilizador):
-        {
-            "access": "<JWT>",
-            "refresh": "<JWT>",
-            "is_new_user": true,
-            "user": { ... }
-        }
-
-    Response (400 Bad Request):
-        { "error": "id_token é obrigatório." }
-
-    Response (401 Unauthorized):
-        { "error": "Token Google inválido ou expirado." }
-    """
+    """Login com Google OAuth 2.0."""
 
     permission_classes = [AllowAny]
-    authentication_classes = []  # Não requer autenticação prévia
+    authentication_classes = []
 
+    @extend_schema(
+        tags=["Auth"],
+        summary="Login com Google",
+        description=(
+            "Recebe o `id_token` retornado pelo Google Sign-In e autentica o utilizador.\n\n"
+            "**Fluxo:**\n"
+            "1. O frontend inicia o Google Sign-In\n"
+            "2. O Google retorna um `credential` (id_token JWT)\n"
+            "3. O frontend envia esse token para este endpoint\n"
+            "4. O backend verifica junto ao Google e retorna tokens JWT + dados do user\n\n"
+            "**Comportamento:**\n"
+            "- Primeiro login → cria conta e retorna `201 Created` com `is_new_user: true`\n"
+            "- Login recorrente → retorna `200 OK` com `is_new_user: false`\n"
+            "- Email já existe sem Google → vincula a conta ao Google e retorna `200 OK`"
+        ),
+        request=GoogleAuthSerializer,
+        responses={
+            200: OpenApiResponse(
+                description="Login bem-sucedido — utilizador existente",
+                examples=[_AUTH_SUCCESS_EXAMPLE_EXISTING],
+            ),
+            201: OpenApiResponse(
+                description="Login bem-sucedido — novo utilizador criado",
+                examples=[_AUTH_SUCCESS_EXAMPLE_NEW],
+            ),
+            400: OpenApiResponse(
+                description="Pedido inválido — `id_token` em falta ou malformado",
+                examples=[
+                    OpenApiExample(
+                        name="Token em falta",
+                        value={"error": "id_token é obrigatório.", "details": {"id_token": ["This field is required."]}},
+                        response_only=True,
+                        status_codes=["400"],
+                    )
+                ],
+            ),
+            401: OpenApiResponse(
+                description="Token Google inválido ou expirado",
+                examples=[
+                    OpenApiExample(
+                        name="Token inválido",
+                        value={"error": "Token Google inválido ou expirado.", "details": "Token invalid: ..."},
+                        response_only=True,
+                        status_codes=["401"],
+                    )
+                ],
+            ),
+            500: OpenApiResponse(description="Erro interno do servidor"),
+        },
+        examples=[
+            OpenApiExample(
+                name="Payload de login",
+                summary="Enviar id_token do Google",
+                value={"id_token": "<google-id-token-jwt>"},
+                request_only=True,
+            )
+        ],
+    )
     def post(self, request):
         serializer = GoogleAuthSerializer(data=request.data)
 
@@ -86,9 +149,7 @@ class GoogleLoginView(APIView):
         id_token_str = serializer.validated_data["id_token"]
 
         try:
-            user, is_new_user = GoogleAuthService.authenticate_or_create_user(
-                id_token_str
-            )
+            user, is_new_user = GoogleAuthService.authenticate_or_create_user(id_token_str)
         except InvalidGoogleTokenException as e:
             logger.warning(f"Tentativa de login com token inválido: {e}")
             return Response(
@@ -118,21 +179,43 @@ class GoogleLoginView(APIView):
 
 
 class TokenRefreshView(APIView):
-    """
-    Renova o access token usando o refresh token.
-
-    POST /api/auth/token/refresh/
-
-    Request Body:
-        { "refresh": "<refresh token JWT>" }
-
-    Response (200 OK):
-        { "access": "<novo access token JWT>" }
-    """
+    """Renovação do access token."""
 
     permission_classes = [AllowAny]
     authentication_classes = []
 
+    @extend_schema(
+        tags=["Auth"],
+        summary="Renovar access token",
+        description=(
+            "Usa o `refresh` token para gerar um novo `access` token.\n\n"
+            "O `refresh` token tem validade de **7 dias**. O `access` token gerado tem validade de **1 hora**.\n\n"
+            "> ⚠️ Com `ROTATE_REFRESH_TOKENS = True`, o refresh token antigo é invalidado e um novo é gerado."
+        ),
+        request=None,
+        responses={
+            200: OpenApiResponse(
+                description="Novo access token gerado",
+                examples=[
+                    OpenApiExample(
+                        name="Token renovado",
+                        value={"access": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."},
+                        response_only=True,
+                        status_codes=["200"],
+                    )
+                ],
+            ),
+            400: OpenApiResponse(description="Campo `refresh` em falta"),
+            401: OpenApiResponse(description="Refresh token inválido ou expirado"),
+        },
+        examples=[
+            OpenApiExample(
+                name="Payload",
+                value={"refresh": "<refresh-token-jwt>"},
+                request_only=True,
+            )
+        ],
+    )
     def post(self, request):
         refresh_token = request.data.get("refresh")
 
@@ -155,23 +238,42 @@ class TokenRefreshView(APIView):
 
 
 class LogoutView(APIView):
-    """
-    Invalida o refresh token (blacklist), terminando a sessão.
-
-    POST /api/auth/logout/
-
-    Headers:
-        Authorization: Bearer <access token>
-
-    Request Body:
-        { "refresh": "<refresh token>" }
-
-    Response (200 OK):
-        { "message": "Sessão terminada com sucesso." }
-    """
+    """Terminar sessão."""
 
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        tags=["Auth"],
+        summary="Logout",
+        description=(
+            "Invalida o `refresh` token, terminando a sessão do utilizador.\n\n"
+            "O token é adicionado à **blacklist** do SimpleJWT e não pode mais ser usado.\n\n"
+            "**Requer:** `Authorization: Bearer <access_token>` no header."
+        ),
+        request=None,
+        responses={
+            200: OpenApiResponse(
+                description="Sessão terminada",
+                examples=[
+                    OpenApiExample(
+                        name="Sucesso",
+                        value={"message": "Sessão terminada com sucesso."},
+                        response_only=True,
+                        status_codes=["200"],
+                    )
+                ],
+            ),
+            400: OpenApiResponse(description="Campo `refresh` em falta ou token já expirado"),
+            401: OpenApiResponse(description="Não autenticado — access token inválido ou em falta"),
+        },
+        examples=[
+            OpenApiExample(
+                name="Payload",
+                value={"refresh": "<refresh-token-jwt>"},
+                request_only=True,
+            )
+        ],
+    )
     def post(self, request):
         refresh_token = request.data.get("refresh")
 
@@ -197,44 +299,45 @@ class LogoutView(APIView):
 
 
 class MeView(APIView):
-    """
-    Retorna os dados do utilizador autenticado.
-
-    GET /api/auth/me/
-
-    Headers:
-        Authorization: Bearer <access token>
-
-    Response (200 OK):
-        {
-            "id": 1,
-            "email": "user@example.com",
-            "name": "Nome Completo",
-            "avatar_url": "https://...",
-            "is_new_user": false,
-            "created_at": "...",
-            "updated_at": "..."
-        }
-
-    # TODO (Frontend): Usar esta resposta para preencher o estado global do utilizador
-    # e exibir nome/avatar no header da plataforma.
-    # Exemplo de uso no header:
-    #
-    # if (user) {
-    #   return (
-    #     <div className="user-header">
-    #       <img src={user.avatar_url} alt={user.name} />
-    #       <span>{user.name}</span>
-    #       <button onClick={handleLogout}>Sair</button>
-    #     </div>
-    #   )
-    # } else {
-    #   return <GoogleLoginButton />
-    # }
-    """
+    """Dados do utilizador autenticado."""
 
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        tags=["Users"],
+        summary="Perfil do utilizador autenticado",
+        description=(
+            "Retorna os dados do utilizador associado ao JWT enviado no header.\n\n"
+            "**Requer:** `Authorization: Bearer <access_token>` no header.\n\n"
+            "Use este endpoint para:\n"
+            "- Preencher o estado global do utilizador no frontend após login\n"
+            "- Exibir nome e avatar no header da plataforma\n"
+            "- Verificar se o utilizador está activo"
+        ),
+        responses={
+            200: OpenApiResponse(
+                response=UserSerializer,
+                description="Dados do utilizador",
+                examples=[
+                    OpenApiExample(
+                        name="Utilizador autenticado",
+                        value={
+                            "id": 1,
+                            "email": "user@gmail.com",
+                            "name": "Nome Completo",
+                            "avatar_url": "https://lh3.googleusercontent.com/...",
+                            "is_new_user": False,
+                            "created_at": "2024-01-01T12:00:00Z",
+                            "updated_at": "2024-01-15T08:30:00Z",
+                        },
+                        response_only=True,
+                        status_codes=["200"],
+                    )
+                ],
+            ),
+            401: OpenApiResponse(description="Não autenticado — access token inválido ou em falta"),
+        },
+    )
     def get(self, request):
         serializer = UserSerializer(request.user)
         return Response(serializer.data, status=status.HTTP_200_OK)

@@ -1,4 +1,4 @@
-django==4.2.30
+django==5.0.4
 psycopg2-binary==2.9.9
 python-decouple==3.8
 dj-database-url==2.1.0
@@ -9,3 +9,4 @@ google-auth==2.38.0
 requests==2.31.0
 django-cors-headers==4.9.0
 whitenoise==6.5.0
+drf-spectacular==0.27.2

@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
+    'drf_spectacular'
 ]
 
 # Authentication
@@ -49,7 +50,6 @@ AUTH_USER_MODEL = "authentication.User"
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -69,6 +69,7 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": (
         "rest_framework.renderers.JSONRenderer",
     ),
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
 }
@@ -150,7 +151,7 @@ MEDIA_ROOT = os.path.join(BASE_DIR, "../", "mediafiles")
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Google Auth:
+# JWT Configuration
 SIMPLE_JWT = {
     # Access token expira em 1 hora (curto por segurança)
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=1),
@@ -210,4 +211,64 @@ LOGGING = {
             "propagate": True,
         },
     },
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Shio API",
+    "DESCRIPTION": (
+        "API REST da plataforma Shio.\n\n"
+        "## Autenticação\n\n"
+        "Esta API usa **JWT Bearer Token**.\n\n"
+        "1. Faça login em `POST /api/auth/google/` com o `id_token` do Google\n"
+        "2. Copie o campo `access` da resposta\n"
+        "3. Clique em **Authorize** (cadeado) e cole: `Bearer <access_token>`\n\n"
+        "O access token expira em **1 hora**. Use `POST /api/auth/token/refresh/` para renovar."
+    ),
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+
+    # Segurança — define o esquema JWT para o botão Authorize do Swagger UI
+    "SECURITY": [{"BearerAuth": []}],
+    "COMPONENTS": {
+        "securitySchemes": {
+            "BearerAuth": {
+                "type": "http",
+                "scheme": "bearer",
+                "bearerFormat": "JWT",
+                "description": "Token JWT. Formato: `Bearer <access_token>`",
+            }
+        }
+    },
+
+    # Ordenação e agrupamento por tags
+    "SORT_OPERATIONS": True,
+    "TAGS": [
+        {
+            "name": "Auth",
+            "description": "Autenticação com Google OAuth 2.0 e gestão de sessões JWT.",
+        },
+        {
+            "name": "Users",
+            "description": "Dados do utilizador autenticado.",
+        },
+    ],
+
+    # Swagger UI — aparência e comportamento
+    "SWAGGER_UI_SETTINGS": {
+        "deepLinking": True,
+        "persistAuthorization": True,   # Mantém o token entre reloads da página
+        "displayOperationId": False,
+        "defaultModelsExpandDepth": 2,
+        "defaultModelExpandDepth": 2,
+        "docExpansion": "list",          # Mostra os endpoints colapsados por default
+        "filter": True,                  # Barra de busca no topo
+        "tryItOutEnabled": True,         # Botão "Try it out" activo por default
+    },
+
+    # Extensões úteis
+    "ENUM_GENERATE_CHOICE_DESCRIPTION": True,
+    "COMPONENT_SPLIT_REQUEST": True,     # Separa schemas de request e response
+    "POSTPROCESSING_HOOKS": [
+        "drf_spectacular.hooks.postprocess_schema_enums",
+    ],
 }

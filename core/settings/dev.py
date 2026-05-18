@@ -9,8 +9,6 @@ ALLOWED_HOSTS = ['*']
 # https://github.com/adamchainz/django-cors-headers
 
 CORS_ALLOW_ALL_ORIGINS = True
-CORS_ALLOW_CREDENTIALS = True
-
 
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
