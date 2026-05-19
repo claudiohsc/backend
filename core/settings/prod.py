@@ -1,19 +1,27 @@
-from .base import *
-
 import dj_database_url
 
-ALLOWED_HOSTS = []
+from .base import *
+
+ALLOWED_HOSTS = config(
+    "ALLOWED_HOSTS",
+    default="",
+    cast=lambda v: [s.strip() for s in v.split(",") if s.strip()],
+)
 
 
 # django-cors-headers
 # https://github.com/adamchainz/django-cors-headers
 
-CORS_ALLOWED_ORIGINS = []
+CORS_ALLOWED_ORIGINS = config(
+    "CORS_ALLOWED_ORIGINS",
+    default="",
+    cast=lambda v: [s.strip() for s in v.split(",") if s.strip()],
+)
 # CORS_ALLOW_ALL_ORIGINS = True
 
 # SSL Redirect
 
-SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_SSL_REDIRECT = True
 
 # Database
@@ -28,6 +36,9 @@ DATABASES = {
 }
 
 STORAGES = {
+    "default": {
+        "BACKEND": "core.storages.R2MediaStorage",
+    },
     # Enable WhiteNoise's GZip and Brotli compression of static assets:
     # https://whitenoise.readthedocs.io/en/latest/django.html#add-compression-and-caching-support
     "staticfiles": {
@@ -38,3 +49,10 @@ STORAGES = {
 # Don't store the original (un-hashed filename) version of static files, to reduce slug size:
 # https://whitenoise.readthedocs.io/en/latest/django.html#WHITENOISE_KEEP_ONLY_HASHED_FILES
 WHITENOISE_KEEP_ONLY_HASHED_FILES = True
+
+# E-mail — SendGrid via django-anymail
+EMAIL_BACKEND = "anymail.backends.sendgrid.EmailBackend"
+
+ANYMAIL = {
+    "SENDGRID_API_KEY": config("SENDGRID_API_KEY"),
+}

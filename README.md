@@ -1,117 +1,183 @@
-# Backend
+# Shio API — Backend
+
+API REST do e-commerce **Shio** em Django 5 + DRF, com autenticação JWT, login via Google OAuth, documentação OpenAPI (Swagger) e infraestrutura preparada para Cloudflare R2 (mídia) e SendGrid (e-mails transacionais).
 
 ## Visão Geral
 
-Este repositório contém o backend Django da aplicação, com autenticação JWT e suporte a login via Google OAuth. A arquitetura segue a estrutura por apps Django, mantendo a separação entre `base`, `products` e `authentication`.
+- **Stack:** Python 3.12, Django 5.0, Django REST Framework, PostgreSQL, drf-spectacular
+- **Arquitetura:** apps DDD com camadas `Model → Serializer → Service → View`
+- **Apps atuais:** `authentication`, `shared`, `notifications`, `products`
+- **Docs vivos:** [`docs/plano-arquitetura.md`](docs/plano-arquitetura.md) (roadmap, decisões, checklist)
 
 ## Pré-requisitos
 
-- Python 3.9+
-- Docker e Docker Compose
+- Docker + Docker Compose
+- `make` (opcional, mas recomendado para os atalhos do `Makefile`)
 
-## Dependências
-
-As dependências do projeto estão em `requirements.txt`.
-
-## Configuração do ambiente
-
-1. Clone o repositório:
+## Setup inicial
 
 ```bash
+# 1. Clonar
 git clone https://github.com/Shio-Company/Backend.git && cd Backend
-```
 
-2. Copie o arquivo de exemplo de ambiente:
-
-```bash
+# 2. Variáveis de ambiente
 cp .env.example .env
-```
+# Edite o .env e preencha DJANGO_SECRET_KEY, GOOGLE_CLIENT_ID, etc.
 
-3. Atualize os valores do `.env` conforme sua máquina.
+# 3. Gerar uma SECRET_KEY válida (opcional)
+python3 -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())'
 
-4. Garanta permissões no `entrypoint.sh`:
-
-```bash
+# 4. Permissão de execução no entrypoint
 chmod +x entrypoint.sh
-```
 
-## Executando com Docker
-
-O modo recomendado é rodar a aplicação via Docker Compose.
-
-```bash
+# 5. Subir os containers (DB + backend) — entrypoint já roda migrations e cria admin
 docker compose up --build
 ```
 
-O container já executa as migrações e cria o administrador automaticamente.
+A API fica disponível em `http://localhost:8000/`.
 
-## Executando localmente
+## Comandos do dia a dia (Makefile)
 
-1. Crie e ative um ambiente virtual:
+Todos os targets rodam dentro do container `backend`:
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
+| Comando | O que faz |
+|---------|-----------|
+| `make help` | Lista todos os targets disponíveis |
+| `make run` | Sobe os containers (`docker compose up`) |
+| `make migrate` | Aplica migrations pendentes |
+| `make makemigrations` | Gera novas migrations |
+| `make shell` | Abre o `python manage.py shell` |
+| `make check` | Roda `python manage.py check` |
+| `make test` | Roda `pytest -v` com coverage |
+| `make test-cov` | Gera relatório HTML de coverage |
+| `make lint` | Verifica `ruff` + `black` (sem alterar) |
+| `make format` | Formata com `black` e corrige com `ruff --fix` |
+| `make schema-validate` | Valida o schema OpenAPI (`spectacular --validate --fail-on-warn`) |
+| `make ci` | **Gate de PR:** `lint` + `test` + `schema-validate` |
+| `make install` | Reinstala `requirements.txt` no container |
 
-2. Instale as dependências:
-
-```bash
-pip install -r requirements.txt
-```
-
-3. Execute migrações:
-
-```bash
-python manage.py migrate
-```
-
-4. Crie o superusuário com base nas variáveis de ambiente:
-
-```bash
-python manage.py initadmin
-```
-
-5. Inicie o servidor:
+### Comandos equivalentes sem `make`
 
 ```bash
-python manage.py runserver 0.0.0.0:8000
+# Rodar manage.py dentro do container
+docker compose exec backend python manage.py <comando>
+
+# Exemplos:
+docker compose exec backend python manage.py migrate
+docker compose exec backend python manage.py shell
+docker compose exec backend pytest -v
+docker compose exec backend ruff check .
+docker compose exec backend black --check .
+
+# Instalar pacote novo no container (precisa de -u root)
+docker compose exec -u root backend pip install <pacote>
 ```
+
+## Documentação da API (Swagger / OpenAPI)
+
+Com o servidor rodando:
+
+- **Swagger UI:** http://localhost:8000/api/docs/
+- **Redoc:** http://localhost:8000/api/redoc/
+- **Schema bruto:** http://localhost:8000/api/schema/
+
+> Regra do projeto: **100% dos endpoints obrigatoriamente decorados com `@extend_schema`**. O CI bloqueia PRs com warnings (`spectacular --validate --fail-on-warn`).
+
+## Autenticação
+
+A API suporta **dois fluxos de autenticação**, ambos retornando o mesmo par de tokens JWT:
+
+### Google OAuth
+
+```http
+POST /api/auth/google/
+{ "id_token": "<google-id-token>" }
+```
+
+### E-mail e senha
+
+```http
+POST /api/auth/register/
+{ "email": "user@example.com", "password": "SenhaSegura123", "name": "Nome" }
+
+POST /api/auth/login/
+{ "email": "user@example.com", "password": "SenhaSegura123" }
+```
+
+Em qualquer fluxo a resposta é `{ "access", "refresh", "user", "is_new_user" }`.
+
+Para endpoints protegidos: `Authorization: Bearer <access_token>`.
+
+Renovar token: `POST /api/auth/token/refresh/`.
+
+No Swagger UI, clicar em **Authorize** e colar `Bearer <access_token>`.
 
 ## Variáveis de ambiente importantes
 
-- `SETTINGS_FILE_PATH`: caminho do settings, por exemplo `core.settings.dev`.
-- `DJANGO_SECRET_KEY`: chave secreta do Django.
-- `GOOGLE_CLIENT_ID`: client ID do OAuth do Google usado para validar `id_token`.
-- `ADMIN_NAME`, `ADMIN_PASS`, `ADMIN_EMAIL`: credenciais para o superusuário inicial.
+Ver [`.env.example`](.env.example) para a lista completa. As principais:
 
-## Google Auth
+| Variável | Descrição |
+|----------|-----------|
+| `SETTINGS_FILE_PATH` | `core.settings.dev` ou `core.settings.prod` |
+| `DJANGO_SECRET_KEY` | Chave secreta do Django |
+| `GOOGLE_CLIENT_ID` | Client ID do Google OAuth |
+| `DB_NAME` / `DB_USERNAME` / `DB_PASSWORD` / `DB_HOSTNAME` / `DB_PORT` | Credenciais PostgreSQL |
+| `ADMIN_NAME` / `ADMIN_PASS` / `ADMIN_EMAIL` | Superuser criado pelo `initadmin` |
+| `ALLOWED_HOSTS` / `CORS_ALLOWED_ORIGINS` | CSV — usados em prod |
+| `DEFAULT_FROM_EMAIL` / `SUPPORT_EMAIL` | Remetente padrão dos e-mails transacionais |
+| `SENDGRID_API_KEY` | API key do SendGrid (apenas prod) |
+| `R2_*` | Credenciais Cloudflare R2 (apenas prod) |
 
-A autenticação Google é feita em `POST /api/auth/google/`.
+## E-mails transacionais
 
-O frontend deve enviar um payload JSON com o campo `id_token` retornado pelo Google Sign-In.
+O app `notifications/` centraliza o envio via `NotificationService.send(template, recipient, context)`.
 
-Exemplo:
+- **Dev:** `console.EmailBackend` (imprime no terminal)
+- **Test:** `locmem.EmailBackend` (capturado em `mail.outbox`)
+- **Prod:** `anymail.backends.sendgrid.EmailBackend`
 
-```json
-{
-  "id_token": "<google-id-token>"
-}
+Cada envio grava um `EmailLog` (auditoria + retry).
+
+Testar localmente:
+
+```bash
+docker compose exec backend python manage.py send_test_email <destinatario@example.com>
+docker compose exec backend python manage.py send_test_email <to> --template WELCOME
 ```
 
-A resposta inclui `access`, `refresh`, `user` e `is_new_user`.
+## Storage de mídia
+
+- **Dev:** `FileSystemStorage` em `media/`
+- **Prod:** `R2MediaStorage` (Cloudflare R2 via `django-storages[s3]`)
+
+A classe está em `core/storages.py:R2MediaStorage` e é aplicada por field (ex: `ImageField(storage=R2MediaStorage())`).
 
 ## Testes
 
-Execute os testes com:
-
 ```bash
-python manage.py test
+make test         # pytest -v com coverage
+make test-cov     # gera htmlcov/index.html
 ```
 
-## Observações de arquitetura
+`pytest-django` + `factory_boy` configurados. Factories ficam em cada app em `tests/factories.py`.
 
-- `authentication` contém o custom user model e a regra de negócio de login Google.
-- `core/settings` é dividido em `base`, `dev` e `prod`.
-- `base.py` define o modelo de usuário customizado `AUTH_USER_MODEL = "authentication.User"`.
-- `entrypoint.sh` aplica migrações e cria o administrador antes de iniciar o serviço.
+## Estrutura de Apps
+
+```
+backend/
+├── core/                # settings, urls, wsgi, storages
+│   ├── settings/        # base.py | dev.py | prod.py
+│   └── storages.py      # R2MediaStorage
+├── shared/              # TimestampedModel, permissions, exceptions, /api/health/
+├── authentication/      # User custom + Google OAuth + JWT
+├── notifications/       # EmailLog + NotificationService + templates de e-mail
+├── products/            # Catalog atual (renomeado para `catalog/` na Fase 1)
+├── docs/                # Documentação viva do projeto
+├── docker-compose.yml
+├── Dockerfile
+├── entrypoint.sh        # migrate + initadmin + runserver
+├── Makefile
+├── pyproject.toml       # ruff + black + pytest
+└── requirements.txt
+```
+

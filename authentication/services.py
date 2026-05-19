@@ -11,9 +11,9 @@ Fluxo completo:
 """
 
 import logging
-from typing import Tuple
 
 from django.conf import settings
+from django.contrib.auth import authenticate
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 
@@ -24,11 +24,19 @@ logger = logging.getLogger(__name__)
 
 class GoogleAuthException(Exception):
     """Exceção base para erros de autenticação com Google."""
+
     pass
 
 
 class InvalidGoogleTokenException(GoogleAuthException):
     """Token do Google inválido, expirado ou de cliente incorreto."""
+
+    pass
+
+
+class InvalidCredentialsException(Exception):
+    """E-mail ou senha inválidos no login local."""
+
     pass
 
 
@@ -62,27 +70,23 @@ class GoogleAuthService:
 
             # Garantia extra: verificar que o token foi emitido para a nossa app
             if id_info.get("aud") != settings.GOOGLE_CLIENT_ID:
-                raise InvalidGoogleTokenException(
-                    "Token não foi emitido para esta aplicação."
-                )
+                raise InvalidGoogleTokenException("Token não foi emitido para esta aplicação.")
 
             # Verificar que o email foi confirmado pelo Google
             if not id_info.get("email_verified", False):
-                raise InvalidGoogleTokenException(
-                    "Email do utilizador não verificado pelo Google."
-                )
+                raise InvalidGoogleTokenException("Email do utilizador não verificado pelo Google.")
 
             return id_info
 
         except ValueError as e:
             logger.warning(f"Token Google inválido: {e}")
-            raise InvalidGoogleTokenException(f"Token inválido: {str(e)}")
+            raise InvalidGoogleTokenException(f"Token inválido: {str(e)}") from e
         except Exception as e:
             logger.error(f"Erro ao verificar token Google: {e}")
-            raise InvalidGoogleTokenException(f"Erro na verificação: {str(e)}")
+            raise InvalidGoogleTokenException(f"Erro na verificação: {str(e)}") from e
 
     @classmethod
-    def authenticate_or_create_user(cls, id_token_str: str) -> Tuple[User, bool]:
+    def authenticate_or_create_user(cls, id_token_str: str) -> tuple[User, bool]:
         """
         Verifica o token do Google e cria ou autentica o utilizador.
 
@@ -103,15 +107,13 @@ class GoogleAuthService:
         # 1. Verifica o token junto ao Google
         google_payload = cls.verify_google_token(id_token_str)
 
-        google_id = google_payload.get("sub")         # ID único do Google
+        google_id = google_payload.get("sub")  # ID único do Google
         email = google_payload.get("email", "").lower()
         name = google_payload.get("name", "")
         avatar_url = google_payload.get("picture", "")
 
         if not google_id or not email:
-            raise InvalidGoogleTokenException(
-                "Payload do Google não contém sub ou email."
-            )
+            raise InvalidGoogleTokenException("Payload do Google não contém sub ou email.")
 
         # 2. Tenta encontrar por google_id (login recorrente normal)
         try:
@@ -151,7 +153,9 @@ class GoogleAuthService:
             if not user.name and name:
                 user.name = name
             user.is_new_user = False
-            user.save(update_fields=["google_id", "avatar_url", "name", "is_new_user", "updated_at"])
+            user.save(
+                update_fields=["google_id", "avatar_url", "name", "is_new_user", "updated_at"]
+            )
 
             logger.info(f"Conta existente vinculada ao Google: {email}")
             return user, False
@@ -171,3 +175,54 @@ class GoogleAuthService:
 
         logger.info(f"Novo utilizador criado via Google: {email}")
         return user, True
+
+
+class LocalAuthService:
+    """Cadastro e login com e-mail e senha (sem Google OAuth)."""
+
+    @staticmethod
+    def register_user(email: str, password: str, name: str) -> User:
+        """Cria um novo utilizador com senha local e dispara e-mail de boas-vindas.
+
+        O envio do WELCOME nunca aborta o cadastro — falhas ficam logadas no EmailLog.
+        """
+        from notifications.services import NotificationService
+
+        email = email.lower().strip()
+        user = User.objects.create_user(
+            email=email,
+            password=password,
+            name=name,
+            is_new_user=True,
+        )
+        logger.info(f"Novo utilizador criado via cadastro local: {email}")
+
+        NotificationService.send(
+            template_name="WELCOME",
+            recipient=user.email,
+            context={"name": user.name, "email": user.email},
+        )
+
+        return user
+
+    @staticmethod
+    def authenticate_user(email: str, password: str) -> User:
+        """Autentica via e-mail + senha. Marca is_new_user=False no primeiro login.
+
+        Raises:
+            InvalidCredentialsException: e-mail não existe, senha incorreta, ou
+                utilizador sem senha utilizável (criado só via Google).
+        """
+        email = email.lower().strip()
+        user = authenticate(username=email, password=password)
+
+        if user is None:
+            logger.warning(f"Tentativa de login falhou: {email}")
+            raise InvalidCredentialsException("E-mail ou senha inválidos.")
+
+        if user.is_new_user:
+            user.is_new_user = False
+            user.save(update_fields=["is_new_user", "updated_at"])
+
+        logger.info(f"Login local bem-sucedido: {email}")
+        return user

@@ -3,7 +3,7 @@ from .base import *
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = ["*"]
 
 # django-cors-headers
 # https://github.com/adamchainz/django-cors-headers
@@ -22,4 +22,18 @@ DATABASES = {
         "HOST": config("DB_HOSTNAME"),
         "PORT": config("DB_PORT", cast=int),
     }
+}
+
+MEDIA_ROOT = BASE_DIR / "media"
+MEDIA_URL = "/media/"
+
+EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
 }

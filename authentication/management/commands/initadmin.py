@@ -1,6 +1,6 @@
+from decouple import config
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
-from decouple import config
 
 
 class Command(BaseCommand):

@@ -1,6 +1,7 @@
 from django.urls import path
-from .views import inventory_summary 
+
+from .views import InventorySummaryView
 
 urlpatterns = [
-    path('inventory/', inventory_summary, name='inventory_summary'),
+    path("inventory/", InventorySummaryView.as_view(), name="inventory_summary"),
 ]

@@ -5,13 +5,6 @@ from drf_spectacular.utils import (
     OpenApiExample,
     OpenApiResponse,
     extend_schema,
-    extend_schema_view,
-)
-from .serializers import (
-    GoogleAuthSerializer,
-    LogoutInputSerializer,
-    TokenRefreshInputSerializer,
-    UserSerializer,
 )
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -19,8 +12,20 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .serializers import GoogleAuthSerializer, UserSerializer
-from .services import GoogleAuthService, InvalidGoogleTokenException
+from .serializers import (
+    EmailLoginSerializer,
+    GoogleAuthSerializer,
+    LogoutInputSerializer,
+    RegisterSerializer,
+    TokenRefreshInputSerializer,
+    UserSerializer,
+)
+from .services import (
+    GoogleAuthService,
+    InvalidCredentialsException,
+    InvalidGoogleTokenException,
+    LocalAuthService,
+)
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -33,6 +38,7 @@ def get_tokens_for_user(user) -> dict:
         "refresh": str(refresh),
         "access": str(refresh.access_token),
     }
+
 
 _AUTH_SUCCESS_EXAMPLE_NEW = OpenApiExample(
     name="Novo utilizador (201)",
@@ -79,6 +85,7 @@ _AUTH_SUCCESS_EXAMPLE_EXISTING = OpenApiExample(
 
 # ─── Views ────────────────────────────────────────────────────────────────────
 
+
 class GoogleLoginView(APIView):
     """Login com Google OAuth 2.0."""
 
@@ -115,7 +122,10 @@ class GoogleLoginView(APIView):
                 examples=[
                     OpenApiExample(
                         name="Token em falta",
-                        value={"error": "id_token é obrigatório.", "details": {"id_token": ["This field is required."]}},
+                        value={
+                            "error": "id_token é obrigatório.",
+                            "details": {"id_token": ["This field is required."]},
+                        },
                         response_only=True,
                         status_codes=["400"],
                     )
@@ -126,7 +136,10 @@ class GoogleLoginView(APIView):
                 examples=[
                     OpenApiExample(
                         name="Token inválido",
-                        value={"error": "Token Google inválido ou expirado.", "details": "Token invalid: ..."},
+                        value={
+                            "error": "Token Google inválido ou expirado.",
+                            "details": "Token invalid: ...",
+                        },
                         response_only=True,
                         status_codes=["401"],
                     )
@@ -181,6 +194,196 @@ class GoogleLoginView(APIView):
                 "user": user_data,
             },
             status=response_status,
+        )
+
+
+class RegisterView(APIView):
+    """Cadastro com e-mail e senha."""
+
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    @extend_schema(
+        tags=["Auth"],
+        summary="Cadastro com e-mail e senha",
+        description=(
+            "Cria uma nova conta com e-mail e senha local e retorna tokens JWT.\n\n"
+            "**Fluxo:**\n"
+            "1. Frontend envia `email`, `password` e `name`\n"
+            "2. Backend valida (e-mail único, senha forte) e cria o utilizador\n"
+            "3. Backend dispara e-mail de boas-vindas (não-bloqueante)\n"
+            "4. Backend retorna tokens JWT + dados do utilizador\n\n"
+            "**Validações da senha:** mínimo 8 caracteres + regras de Django "
+            "(`UserAttributeSimilarity`, `MinimumLength`, `CommonPassword`, `NumericPassword`)."
+        ),
+        request=RegisterSerializer,
+        responses={
+            201: OpenApiResponse(
+                description="Conta criada com sucesso",
+                examples=[
+                    OpenApiExample(
+                        name="Cadastro bem-sucedido",
+                        value={
+                            "access": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                            "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                            "is_new_user": True,
+                            "user": {
+                                "id": 1,
+                                "email": "user@example.com",
+                                "name": "Nome Completo",
+                                "avatar_url": None,
+                                "is_new_user": True,
+                                "created_at": "2024-01-01T12:00:00Z",
+                                "updated_at": "2024-01-01T12:00:00Z",
+                            },
+                        },
+                        response_only=True,
+                        status_codes=["201"],
+                    )
+                ],
+            ),
+            400: OpenApiResponse(
+                description="Payload inválido (e-mail duplicado, senha fraca, etc.)",
+                examples=[
+                    OpenApiExample(
+                        name="E-mail já cadastrado",
+                        value={
+                            "error": "Dados inválidos.",
+                            "details": {"email": ["E-mail já cadastrado."]},
+                        },
+                        response_only=True,
+                        status_codes=["400"],
+                    )
+                ],
+            ),
+        },
+        examples=[
+            OpenApiExample(
+                name="Payload de cadastro",
+                value={
+                    "email": "user@example.com",
+                    "password": "SenhaSegura123",
+                    "name": "Nome Completo",
+                },
+                request_only=True,
+            )
+        ],
+    )
+    def post(self, request):
+        serializer = RegisterSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"error": "Dados inválidos.", "details": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = LocalAuthService.register_user(
+            email=serializer.validated_data["email"],
+            password=serializer.validated_data["password"],
+            name=serializer.validated_data["name"],
+        )
+
+        tokens = get_tokens_for_user(user)
+        return Response(
+            {
+                "access": tokens["access"],
+                "refresh": tokens["refresh"],
+                "is_new_user": True,
+                "user": UserSerializer(user).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class LoginView(APIView):
+    """Login com e-mail e senha."""
+
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    @extend_schema(
+        tags=["Auth"],
+        summary="Login com e-mail e senha",
+        description=(
+            "Autentica um utilizador com e-mail e senha e retorna tokens JWT.\n\n"
+            "Retorna `401 Unauthorized` para e-mail desconhecido, senha incorreta, "
+            "ou contas criadas apenas via Google (sem senha local)."
+        ),
+        request=EmailLoginSerializer,
+        responses={
+            200: OpenApiResponse(
+                description="Login bem-sucedido",
+                examples=[
+                    OpenApiExample(
+                        name="Login OK",
+                        value={
+                            "access": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                            "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                            "is_new_user": False,
+                            "user": {
+                                "id": 1,
+                                "email": "user@example.com",
+                                "name": "Nome Completo",
+                                "avatar_url": None,
+                                "is_new_user": False,
+                                "created_at": "2024-01-01T12:00:00Z",
+                                "updated_at": "2024-01-15T08:30:00Z",
+                            },
+                        },
+                        response_only=True,
+                        status_codes=["200"],
+                    )
+                ],
+            ),
+            400: OpenApiResponse(description="Payload inválido (campos faltando)"),
+            401: OpenApiResponse(
+                description="E-mail ou senha inválidos",
+                examples=[
+                    OpenApiExample(
+                        name="Credenciais inválidas",
+                        value={"error": "E-mail ou senha inválidos."},
+                        response_only=True,
+                        status_codes=["401"],
+                    )
+                ],
+            ),
+        },
+        examples=[
+            OpenApiExample(
+                name="Payload de login",
+                value={"email": "user@example.com", "password": "SenhaSegura123"},
+                request_only=True,
+            )
+        ],
+    )
+    def post(self, request):
+        serializer = EmailLoginSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"error": "Dados inválidos.", "details": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            user = LocalAuthService.authenticate_user(
+                email=serializer.validated_data["email"],
+                password=serializer.validated_data["password"],
+            )
+        except InvalidCredentialsException as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        tokens = get_tokens_for_user(user)
+        return Response(
+            {
+                "access": tokens["access"],
+                "refresh": tokens["refresh"],
+                "is_new_user": False,
+                "user": UserSerializer(user).data,
+            },
+            status=status.HTTP_200_OK,
         )
 
 

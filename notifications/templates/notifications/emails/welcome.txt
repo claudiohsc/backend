@@ -1,0 +1,6 @@
+{% extends "notifications/emails/base.txt" %}
+{% block content %}
+Olá, {{ name }}!
+
+Bem-vindo à Shio. Seu cadastro foi realizado com sucesso.
+{% endblock %}

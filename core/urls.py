@@ -1,4 +1,3 @@
-from django.conf import settings
 from django.contrib import admin
 from django.urls import include, path
 from drf_spectacular.views import (
@@ -10,7 +9,7 @@ from drf_spectacular.views import (
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/auth/", include("authentication.urls", namespace="authentication")),
-    path("api/", include("base.urls")),
+    path("api/", include("shared.urls")),
     path("api/products/", include("products.urls")),
 ]
 
@@ -21,7 +20,6 @@ urlpatterns += [
         SpectacularSwaggerView.as_view(url_name="schema"),
         name="swagger-ui",
     ),
-
     path(
         "api/docs/redoc/",
         SpectacularRedocView.as_view(url_name="schema"),
