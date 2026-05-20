@@ -35,6 +35,25 @@ cp .env.example .env
 chmod +x entrypoint.sh
 ```
 
+## Comandos do dia a dia (Makefile)
+
+Todos os targets rodam dentro do container `backend`:
+
+| Comando | O que faz |
+|---------|-----------|
+| `make help` | Lista todos os targets disponíveis |
+| `make run` | Sobe os containers (`docker compose up`) |
+| `make migrate` | Aplica migrations pendentes |
+| `make makemigrations` | Gera novas migrations |
+| `make shell` | Abre o `python manage.py shell` |
+| `make check` | Roda `python manage.py check` |
+| `make lint` | Verifica `ruff` + `black` (sem alterar) |
+| `make format` | Formata com `black` e corrige com `ruff --fix` |
+| `make schema-validate` | Valida o schema OpenAPI (`spectacular --validate --fail-on-warn`) |
+| `make ci` | **Gate de PR:** `lint` + `test` + `schema-validate` |
+| `make install` | Reinstala `requirements.txt` no container |
+
+
 ## Executando com Docker
 
 O modo recomendado é rodar a aplicação via Docker Compose.
