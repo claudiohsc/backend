@@ -11,6 +11,11 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
   pgadmin:
     container_name: shio-pgadmin
     image: dpage/pgadmin4:latest
@@ -33,7 +38,8 @@ services:
     environment:
       - DB_HOSTNAME=db
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
