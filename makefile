@@ -5,8 +5,10 @@ DC_EXEC = docker compose exec backend
 help:
 	@echo "Targets disponíveis:"
 	@echo "  install          Instala dependências no container"
-	@echo "  lint             Verifica ruff + black (sem alterar)"
-	@echo "  format           Formata com black e corrige com ruff --fix"
+	@echo "  lint             Verifica ruff check + ruff format (sem alterar)"
+	@echo "  format           Corrige com ruff --fix e formata com ruff format"
+	@echo "  test             Roda pytest -v com coverage"
+	@echo "  test-cov         Gera relatório HTML de coverage"
 	@echo "  migrate          Aplica migrations pendentes"
 	@echo "  makemigrations   Gera migrations para mudanças nos models"
 	@echo "  run              Sobe o servidor de desenvolvimento"
@@ -20,11 +22,17 @@ install:
 
 lint:
 	$(DC_EXEC) ruff check .
-	$(DC_EXEC) black --check .
+	$(DC_EXEC) ruff format --check .
 
 format:
-	$(DC_EXEC) black .
 	$(DC_EXEC) ruff check . --fix
+	$(DC_EXEC) ruff format .
+
+test:
+	$(DC_EXEC) pytest -v
+
+test-cov:
+	$(DC_EXEC) pytest --cov=. --cov-report=html
 
 migrate:
 	$(DC_EXEC) python manage.py migrate
@@ -33,7 +41,7 @@ makemigrations:
 	$(DC_EXEC) python manage.py makemigrations
 
 run:
-	docker compose up
+	docker compose up -d
 
 shell:
 	$(DC_EXEC) python manage.py shell
