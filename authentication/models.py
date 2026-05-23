@@ -2,7 +2,7 @@ from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.utils.translation import gettext_lazy as _
-
+import uuid
 
 class UserManager(BaseUserManager):
     use_in_migrations = True
@@ -97,3 +97,38 @@ class User(AbstractUser):
 
     def get_short_name(self):
         return self.name.split()[0] if self.name else self.email
+    
+
+class UserRole(models.TextChoices):
+    CUSTOMER = 'CUSTOMER', 'Customer'
+    ADMIN = 'ADMIN', 'Admin'
+    INVENTORY_MANAGER = 'INVENTORY_MANAGER', 'Inventory Manager'
+
+class UserProfile(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    phone_number = models.CharField(max_length=20, null=True, blank=True)
+    cpf = models.CharField(max_length=14, unique=True, null=True, blank=True)
+    role = models.CharField(max_length=20, choices=UserRole.choices, default=UserRole.CUSTOMER)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Perfil de {self.user.email}"
+
+class Address(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='addresses')
+    title = models.CharField(max_length=50, default='Home')
+    zip_code = models.CharField(max_length=9)
+    street = models.CharField(max_length=255)
+    address_number = models.CharField(max_length=20)
+    complement = models.CharField(max_length=100, null=True, blank=True)
+    neighborhood = models.CharField(max_length=100)
+    city = models.CharField(max_length=100)
+    state = models.CharField(max_length=2)
+    is_default = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.title} - {self.user.email}"
