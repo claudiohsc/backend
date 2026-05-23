@@ -1,8 +1,6 @@
 import uuid
 from django.db import models
 from django.conf import settings
-from products.models import ProductVariation
-from authentication.models import Address
 
 class OrderStatus(models.TextChoices):
     AWAITING_PAYMENT = 'AWAITING_PAYMENT', 'Awaiting Payment'
@@ -44,7 +42,7 @@ class Cart(models.Model):
 class CartItem(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     cart = models.ForeignKey(Cart, on_delete=models.CASCADE, related_name='items')
-    variation = models.ForeignKey(ProductVariation, on_delete=models.CASCADE)
+    variation = models.ForeignKey('products.ProductVariation', on_delete=models.CASCADE)
     quantity = models.PositiveIntegerField()
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)
     updated_at = models.DateTimeField(auto_now=True)
@@ -52,7 +50,7 @@ class CartItem(models.Model):
 class CustomerOrder(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.RESTRICT, related_name='orders')
-    address = models.ForeignKey(Address, on_delete=models.SET_NULL, null=True, blank=True)
+    address = models.ForeignKey('authentication.Address', on_delete=models.SET_NULL, null=True, blank=True)
     coupon = models.ForeignKey(Coupon, on_delete=models.SET_NULL, null=True, blank=True)
     status = models.CharField(max_length=50, choices=OrderStatus.choices, default=OrderStatus.AWAITING_PAYMENT)
     
@@ -76,10 +74,10 @@ class CustomerOrder(models.Model):
 class OrderItem(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     order = models.ForeignKey(CustomerOrder, on_delete=models.CASCADE, related_name='items')
-    variation = models.ForeignKey(ProductVariation, on_delete=models.SET_NULL, null=True)
+    variation = models.ForeignKey('products.ProductVariation', on_delete=models.SET_NULL, null=True)
     quantity = models.PositiveIntegerField()
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)
-    product_name = models.CharField(max_length=255) # Snapshot do nome
+    product_name = models.CharField(max_length=255)
     sku_snapshot = models.CharField(max_length=100, null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
