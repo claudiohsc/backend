@@ -254,6 +254,10 @@ SPECTACULAR_SETTINGS = {
             "name": "Users",
             "description": "Dados do utilizador autenticado.",
         },
+        {
+            "name": "Categories",
+            "description": "Gestão e listagem de categorias de produtos.",
+        },
     ],
 
     # Swagger UI — aparência e comportamento
