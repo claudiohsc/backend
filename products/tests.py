@@ -20,7 +20,16 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from authentication.models import UserProfile, UserRole
 
-from .models import Category, DropCampaign, Product
+from .models import (
+    Category,
+    DropCampaign,
+    Product,
+    ProductImage,
+    ProductVariation,
+    StockMovement,
+    StockMovementKind,
+    StockMovementReason,
+)
 
 User = get_user_model()
 
@@ -46,6 +55,13 @@ def make_banner(name="banner.jpg"):
     buf = BytesIO()
     Image.new("RGB", (1, 1), color="red").save(buf, format="JPEG")
     return SimpleUploadedFile(name, buf.getvalue(), content_type="image/jpeg")
+
+
+def make_product(name="Camiseta", **kwargs):
+    """Cria um Product com defaults razoáveis."""
+    defaults = {"description": "desc", "base_price": 100, "is_active": True}
+    defaults.update(kwargs)
+    return Product.objects.create(name=name, **defaults)
 
 
 # ─── List & Create ────────────────────────────────────────────────────────────
@@ -528,3 +544,481 @@ class DropProductManageTests(APITestCase):
         url = f"/api/catalog/drops/{self.drop.id}/products/{uuid.uuid4()}/"
         response = self.client.post(url, **auth_header(self.admin))
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+
+# ─── Product — List ───────────────────────────────────────────────────────────
+
+
+class ProductListTests(APITestCase):
+    """Testes para GET/POST /api/catalog/products/."""
+
+    url = "/api/catalog/products/"
+
+    def setUp(self):
+        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin")
+        self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
+        self.category = Category.objects.create(name="Camisetas", slug="camisetas")
+        self.drop = DropCampaign.objects.create(name="Verão", slug="verao", is_active=True)
+        self.ativo = make_product(name="Camisa Branca", category=self.category, drop=self.drop)
+        make_product(name="Camisa Preta", category=self.category)
+        self.inativo = make_product(name="Removido", is_active=False)
+
+    def test_listagem_publica_so_retorna_ativos(self):
+        """Sem token, só produtos com is_active=True são retornados."""
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        body = response.json()
+        self.assertEqual(body["count"], 2)
+        names = [p["name"] for p in body["results"]]
+        self.assertNotIn("Removido", names)
+
+    def test_admin_ve_inativos(self):
+        """Admin vê produtos inativos por default."""
+        response = self.client.get(self.url, **auth_header(self.admin))
+        self.assertEqual(response.json()["count"], 3)
+
+    def test_admin_filtra_is_active_false(self):
+        """Admin pode passar ?is_active=false e ver só inativos."""
+        response = self.client.get(f"{self.url}?is_active=false", **auth_header(self.admin))
+        body = response.json()
+        self.assertEqual(body["count"], 1)
+        self.assertEqual(body["results"][0]["name"], "Removido")
+
+    def test_filtro_por_category(self):
+        response = self.client.get(f"{self.url}?category={self.category.id}")
+        self.assertEqual(response.json()["count"], 2)
+
+    def test_filtro_por_drop(self):
+        response = self.client.get(f"{self.url}?drop={self.drop.id}")
+        self.assertEqual(response.json()["count"], 1)
+        self.assertEqual(response.json()["results"][0]["name"], "Camisa Branca")
+
+    def test_busca_por_name(self):
+        response = self.client.get(f"{self.url}?search=branca")
+        self.assertEqual(response.json()["count"], 1)
+        self.assertEqual(response.json()["results"][0]["name"], "Camisa Branca")
+
+    def test_ordering_por_created_at_desc(self):
+        """Mais recente primeiro."""
+        response = self.client.get(self.url)
+        results = response.json()["results"]
+        ids_returned = [r["id"] for r in results]
+        # Última criada (Camisa Preta — feita depois) vem antes da Camisa Branca
+        self.assertEqual(ids_returned[0], str(Product.objects.get(name="Camisa Preta").id))
+
+
+# ─── Product — Detail ─────────────────────────────────────────────────────────
+
+
+class ProductDetailTests(APITestCase):
+    """Testes para GET /api/catalog/products/{id}/."""
+
+    def setUp(self):
+        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin")
+        self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
+        self.product = make_product(name="Camiseta")
+        self.inativo = make_product(name="Inativo", is_active=False)
+
+    def test_detalhe_publico_de_ativo(self):
+        response = self.client.get(f"/api/catalog/products/{self.product.id}/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        body = response.json()
+        self.assertEqual(body["name"], "Camiseta")
+        self.assertIn("variations", body)
+        self.assertIn("images", body)
+
+    def test_inativo_retorna_404_para_publico(self):
+        response = self.client.get(f"/api/catalog/products/{self.inativo.id}/")
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_inativo_retorna_404_para_customer(self):
+        response = self.client.get(
+            f"/api/catalog/products/{self.inativo.id}/",
+            **auth_header(self.customer),
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_admin_ve_inativo(self):
+        response = self.client.get(
+            f"/api/catalog/products/{self.inativo.id}/",
+            **auth_header(self.admin),
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_uuid_inexistente_404(self):
+        response = self.client.get(f"/api/catalog/products/{uuid.uuid4()}/")
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+
+# ─── Product — Create / Update / Delete ───────────────────────────────────────
+
+
+class ProductCreateTests(APITestCase):
+    url = "/api/catalog/products/"
+
+    def setUp(self):
+        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin")
+        self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
+
+    def test_admin_cria_produto_simples(self):
+        response = self.client.post(
+            self.url,
+            {"name": "Novo", "description": "x", "base_price": "99.90"},
+            format="json",
+            **auth_header(self.admin),
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.json()["name"], "Novo")
+
+    def test_admin_cria_com_variations_aninhadas(self):
+        response = self.client.post(
+            self.url,
+            {
+                "name": "Camisa",
+                "description": "Algodão",
+                "base_price": "120.00",
+                "variations": [
+                    {"size": "P", "sku": "CAM-P", "stock_quantity": 10},
+                    {"size": "M", "sku": "CAM-M", "stock_quantity": 5},
+                ],
+            },
+            format="json",
+            **auth_header(self.admin),
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(len(response.json()["variations"]), 2)
+
+    def test_base_price_negativo_400(self):
+        response = self.client.post(
+            self.url,
+            {"name": "X", "description": "x", "base_price": "-1"},
+            format="json",
+            **auth_header(self.admin),
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_sku_duplicado_400(self):
+        ProductVariation.objects.create(
+            product=make_product(), size="P", sku="DUP-1", stock_quantity=1
+        )
+        response = self.client.post(
+            self.url,
+            {
+                "name": "Outro",
+                "description": "x",
+                "base_price": "10",
+                "variations": [{"size": "P", "sku": "DUP-1", "stock_quantity": 1}],
+            },
+            format="json",
+            **auth_header(self.admin),
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_customer_nao_pode_criar(self):
+        response = self.client.post(
+            self.url,
+            {"name": "X", "description": "x", "base_price": "1"},
+            format="json",
+            **auth_header(self.customer),
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_sem_token_nao_pode_criar(self):
+        response = self.client.post(
+            self.url,
+            {"name": "X", "description": "x", "base_price": "1"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class ProductUpdateTests(APITestCase):
+    def setUp(self):
+        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin")
+        self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
+        self.product = make_product(name="Old")
+        self.url = f"/api/catalog/products/{self.product.id}/"
+
+    def test_admin_put_atualiza(self):
+        response = self.client.put(
+            self.url,
+            {"name": "New", "description": "y", "base_price": "50"},
+            format="json",
+            **auth_header(self.admin),
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.json()["name"], "New")
+
+    def test_customer_nao_pode_atualizar(self):
+        response = self.client.put(
+            self.url,
+            {"name": "x", "description": "y", "base_price": "1"},
+            format="json",
+            **auth_header(self.customer),
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class ProductDeleteTests(APITestCase):
+    def setUp(self):
+        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin")
+        self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
+        self.product = make_product()
+        self.url = f"/api/catalog/products/{self.product.id}/"
+
+    def test_admin_remove(self):
+        response = self.client.delete(self.url, **auth_header(self.admin))
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Product.objects.filter(pk=self.product.id).exists())
+
+    def test_customer_nao_pode_remover(self):
+        response = self.client.delete(self.url, **auth_header(self.customer))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+# ─── Variation — CRUD ─────────────────────────────────────────────────────────
+
+
+class VariationCRUDTests(APITestCase):
+    def setUp(self):
+        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin")
+        self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
+        self.product = make_product()
+        self.variation = ProductVariation.objects.create(
+            product=self.product, size="P", sku="V-P", stock_quantity=10
+        )
+        self.create_url = f"/api/catalog/products/{self.product.id}/variations/"
+        self.detail_url = f"/api/catalog/variations/{self.variation.id}/"
+
+    def test_admin_cria_variacao(self):
+        response = self.client.post(
+            self.create_url,
+            {"size": "M", "sku": "V-M", "stock_quantity": 5},
+            format="json",
+            **auth_header(self.admin),
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(self.product.variations.count(), 2)
+
+    def test_sku_duplicado_400(self):
+        ProductVariation.objects.create(
+            product=make_product(name="Outro"), size="G", sku="DUP-X", stock_quantity=1
+        )
+        response = self.client.post(
+            self.create_url,
+            {"size": "M", "sku": "DUP-X", "stock_quantity": 1},
+            format="json",
+            **auth_header(self.admin),
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_admin_atualiza_variacao(self):
+        response = self.client.put(
+            self.detail_url,
+            {"size": "G", "sku": "V-G", "stock_quantity": 20},
+            format="json",
+            **auth_header(self.admin),
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.variation.refresh_from_db()
+        self.assertEqual(self.variation.size, "G")
+
+    def test_admin_remove_variacao(self):
+        response = self.client.delete(self.detail_url, **auth_header(self.admin))
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(ProductVariation.objects.filter(pk=self.variation.id).exists())
+
+    def test_customer_nao_pode_criar(self):
+        response = self.client.post(
+            self.create_url,
+            {"size": "M", "sku": "V-X", "stock_quantity": 1},
+            format="json",
+            **auth_header(self.customer),
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+# ─── Image — Persist / Delete ─────────────────────────────────────────────────
+
+
+def make_product_image_file(name="img.jpg"):
+    """JPEG válido 1x1 pra upload de ProductImage."""
+    buf = BytesIO()
+    Image.new("RGB", (1, 1), color="red").save(buf, format="JPEG")
+    return SimpleUploadedFile(name, buf.getvalue(), content_type="image/jpeg")
+
+
+class ImagePersistTests(APITestCase):
+    def setUp(self):
+        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin")
+        self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
+        self.product = make_product()
+        self.create_url = f"/api/catalog/products/{self.product.id}/images/"
+
+    def test_primeira_imagem_recebe_display_order_1(self):
+        response = self.client.put(
+            self.create_url,
+            {"image": make_product_image_file()},
+            format="multipart",
+            **auth_header(self.admin),
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.json()["display_order"], 1)
+
+    def test_segunda_imagem_recebe_display_order_2(self):
+        self.client.put(self.create_url, {"image": make_product_image_file("a.jpg")},
+                        format="multipart", **auth_header(self.admin))
+        response = self.client.put(self.create_url, {"image": make_product_image_file("b.jpg")},
+                                   format="multipart", **auth_header(self.admin))
+        self.assertEqual(response.json()["display_order"], 2)
+
+    def test_extensao_invalida_400(self):
+        buf = BytesIO()
+        Image.new("RGB", (1, 1), color="red").save(buf, format="GIF")
+        gif = SimpleUploadedFile("x.gif", buf.getvalue(), content_type="image/gif")
+        response = self.client.put(
+            self.create_url,
+            {"image": gif},
+            format="multipart",
+            **auth_header(self.admin),
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("image", response.json()["details"])
+
+    def test_tamanho_acima_de_5mb_400(self):
+        buf = BytesIO()
+        Image.new("RGB", (1, 1), color="red").save(buf, format="JPEG")
+        content = buf.getvalue() + b"\x00" * (6 * 1024 * 1024)
+        big = SimpleUploadedFile("big.jpg", content, content_type="image/jpeg")
+        response = self.client.put(
+            self.create_url,
+            {"image": big},
+            format="multipart",
+            **auth_header(self.admin),
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_update_substitui_binario_e_mantem_ordem(self):
+        post = self.client.put(self.create_url, {"image": make_product_image_file("antigo.jpg")},
+                               format="multipart", **auth_header(self.admin))
+        image_id = post.json()["id"]
+        old_path = ProductImage.objects.get(pk=image_id).image.path
+        self.assertTrue(os.path.exists(old_path))
+
+        update_url = f"/api/catalog/products/{self.product.id}/images/{image_id}/"
+        response = self.client.put(
+            update_url,
+            {"image": make_product_image_file("novo.jpg")},
+            format="multipart",
+            **auth_header(self.admin),
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(os.path.exists(old_path))
+        self.assertEqual(response.json()["display_order"], 1)
+
+    def test_delete_apaga_do_disco(self):
+        post = self.client.put(self.create_url, {"image": make_product_image_file()},
+                               format="multipart", **auth_header(self.admin))
+        image_id = post.json()["id"]
+        path = ProductImage.objects.get(pk=image_id).image.path
+        self.assertTrue(os.path.exists(path))
+
+        response = self.client.delete(f"/api/catalog/images/{image_id}/", **auth_header(self.admin))
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(os.path.exists(path))
+
+    def test_customer_nao_pode_subir(self):
+        response = self.client.put(
+            self.create_url,
+            {"image": make_product_image_file()},
+            format="multipart",
+            **auth_header(self.customer),
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+# ─── Stock — Movement ─────────────────────────────────────────────────────────
+
+
+class StockMovementTests(APITestCase):
+    def setUp(self):
+        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin")
+        self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
+        self.product = make_product()
+        self.variation = ProductVariation.objects.create(
+            product=self.product, size="P", sku="ST-P", stock_quantity=10
+        )
+        self.url = f"/api/catalog/variations/{self.variation.id}/stock-movements/"
+
+    def test_entrada_aumenta_estoque(self):
+        response = self.client.post(
+            self.url,
+            {"kind": "ENTRADA", "reason": "COMPRA", "quantity": 5, "note": "NF 123"},
+            format="json",
+            **auth_header(self.admin),
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.variation.refresh_from_db()
+        self.assertEqual(self.variation.stock_quantity, 15)
+        self.assertEqual(response.json()["new_stock"], 15)
+
+    def test_saida_reduz_estoque(self):
+        response = self.client.post(
+            self.url,
+            {"kind": "SAIDA", "reason": "VENDA", "quantity": 4},
+            format="json",
+            **auth_header(self.admin),
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.variation.refresh_from_db()
+        self.assertEqual(self.variation.stock_quantity, 6)
+
+    def test_saida_insuficiente_400(self):
+        response = self.client.post(
+            self.url,
+            {"kind": "SAIDA", "reason": "VENDA", "quantity": 100},
+            format="json",
+            **auth_header(self.admin),
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.variation.refresh_from_db()
+        self.assertEqual(self.variation.stock_quantity, 10)
+
+    def test_quantity_zero_400(self):
+        response = self.client.post(
+            self.url,
+            {"kind": "ENTRADA", "reason": "COMPRA", "quantity": 0},
+            format="json",
+            **auth_header(self.admin),
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_created_by_eh_setado(self):
+        self.client.post(
+            self.url,
+            {"kind": "ENTRADA", "reason": "AJUSTE", "quantity": 1},
+            format="json",
+            **auth_header(self.admin),
+        )
+        movement = StockMovement.objects.latest("created_at")
+        self.assertEqual(movement.created_by_id, self.admin.id)
+
+    def test_historico_listado_admin(self):
+        self.client.post(self.url, {"kind": "ENTRADA", "reason": "COMPRA", "quantity": 1},
+                         format="json", **auth_header(self.admin))
+        response = self.client.get(self.url, **auth_header(self.admin))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.json()["count"], 1)
+
+    def test_customer_403(self):
+        response = self.client.post(
+            self.url,
+            {"kind": "ENTRADA", "reason": "COMPRA", "quantity": 1},
+            format="json",
+            **auth_header(self.customer),
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_sem_token_401(self):
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)

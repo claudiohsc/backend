@@ -1,6 +1,8 @@
 import logging
+import uuid
 
-from django.db.models import Q, Sum
+from django.db import transaction
+from django.db.models import Max, Q, Sum
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -8,18 +10,43 @@ from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from authentication.models import UserProfile, UserRole
 from authentication.permissions import IsAdminRole
 
-from .models import Category, DropCampaign, Product
+from .models import (
+    Category,
+    DropCampaign,
+    Product,
+    ProductImage,
+    ProductVariation,
+    StockMovement,
+    StockMovementKind,
+)
 from .serializers import (
     CategorySerializer,
     DropCampaignDetailSerializer,
     DropCampaignSerializer,
+    ProductDetailSerializer,
+    ProductImageSerializer,
+    ProductListSerializer,
+    ProductVariationSerializer,
+    ProductWriteSerializer,
+    StockMovementSerializer,
 )
+
+
+def _is_admin(request):
+    user = request.user
+    if not user or not user.is_authenticated:
+        return False
+    try:
+        return user.profile.role == UserRole.ADMIN
+    except UserProfile.DoesNotExist:
+        return False
 
 logger = logging.getLogger(__name__)
 
@@ -365,3 +392,461 @@ class DropProductManageView(APIView):
         product.save(update_fields=["drop", "updated_at"])
         logger.info(f"Produto {product.id} desvinculado do drop {drop.id}")
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ─── Products ─────────────────────────────────────────────────────────────────
+
+
+class ProductListCreateView(APIView):
+    """Listar produtos (público, com filtros) e criar (admin)."""
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [IsAdminRole()]
+        return [AllowAny()]
+
+    def get_serializer_class(self):
+        return ProductWriteSerializer if self.request.method == "POST" else ProductListSerializer
+
+    @extend_schema(
+        tags=["Products"],
+        summary="Listar produtos",
+        description=(
+            "Lista paginada do catálogo. Endpoint público — só retorna produtos "
+            "com `is_active=True` para chamadas não autenticadas e clientes.\n\n"
+            "Filtros via query: `category={uuid}`, `drop={uuid}`, `search={text}` "
+            "(busca em name/description), `is_active=true|false` (só admin pode passar false).\n\n"
+            "Ordenação padrão: `-created_at`."
+        ),
+        responses={200: ProductListSerializer(many=True)},
+    )
+    def get(self, request):
+        qs = Product.objects.select_related("category", "drop").prefetch_related(
+            "variations", "images"
+        )
+
+        is_admin = _is_admin(request)
+        is_active_param = request.query_params.get("is_active")
+        if is_admin and is_active_param is not None:
+            qs = qs.filter(is_active=is_active_param.lower() == "true")
+        elif not is_admin:
+            qs = qs.filter(is_active=True)
+
+        category = request.query_params.get("category")
+        if category:
+            qs = qs.filter(category_id=category)
+
+        drop = request.query_params.get("drop")
+        if drop:
+            qs = qs.filter(drop_id=drop)
+
+        search = request.query_params.get("search")
+        if search:
+            qs = qs.filter(Q(name__icontains=search) | Q(description__icontains=search))
+
+        qs = qs.order_by("-created_at")
+        paginator = PageNumberPagination()
+        page = paginator.paginate_queryset(qs, request, view=self)
+        serializer = ProductListSerializer(page, many=True, context={"request": request})
+        return paginator.get_paginated_response(serializer.data)
+
+    @extend_schema(
+        tags=["Products"],
+        summary="Criar produto",
+        description=(
+            "Cria um novo produto. Requer perfil ADMIN.\n\n"
+            "Pode incluir `variations` aninhadas (lista de `{size, sku, stock_quantity}`). "
+            "Imagens devem ser enviadas em request separado via `PUT /products/{id}/images/`."
+        ),
+        request=ProductWriteSerializer,
+        responses={
+            201: ProductDetailSerializer,
+            400: OpenApiResponse(description="Dados inválidos (ex: SKU duplicado, base_price negativo)."),
+            401: OpenApiResponse(description="Não autenticado."),
+            403: OpenApiResponse(description="Não autorizado — requer perfil ADMIN."),
+        },
+    )
+    def post(self, request):
+        serializer = ProductWriteSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"error": "Dados inválidos.", "details": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        product = serializer.save()
+        logger.info(f"Produto criado: {product.name} ({product.id})")
+        return Response(
+            ProductDetailSerializer(product, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class ProductDetailView(APIView):
+    """Detalhe (público — 404 se inactive p/ não-admin); update e delete (admin)."""
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [AllowAny()]
+        return [IsAdminRole()]
+
+    def get_serializer_class(self):
+        return ProductWriteSerializer if self.request.method == "PUT" else ProductDetailSerializer
+
+    def _get_object(self, pk, request, allow_inactive_for_admin=True):
+        product = get_object_or_404(
+            Product.objects.select_related("category", "drop").prefetch_related(
+                "variations", "images"
+            ),
+            pk=pk,
+        )
+        if not product.is_active and not (_is_admin(request) and allow_inactive_for_admin):
+            raise Product.DoesNotExist
+        return product
+
+    @extend_schema(
+        tags=["Products"],
+        summary="Detalhe do produto",
+        description=(
+            "Retorna o produto com variations, images, category e drop expandidos.\n\n"
+            "Retorna 404 se `is_active=False` para chamadas não autenticadas ou de clientes."
+        ),
+        responses={
+            200: ProductDetailSerializer,
+            404: OpenApiResponse(description="Produto não encontrado."),
+        },
+    )
+    def get(self, request, pk):
+        try:
+            product = self._get_object(pk, request)
+        except Product.DoesNotExist:
+            return Response(
+                {"error": "Produto não encontrado."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(
+            ProductDetailSerializer(product, context={"request": request}).data
+        )
+
+    @extend_schema(
+        tags=["Products"],
+        summary="Atualizar produto (PUT)",
+        description=(
+            "Substitui os dados do produto. Requer perfil ADMIN.\n\n"
+            "Variações e imagens devem ser geridas via sub-endpoints próprios."
+        ),
+        request=ProductWriteSerializer,
+        responses={
+            200: ProductDetailSerializer,
+            400: OpenApiResponse(description="Dados inválidos."),
+            401: OpenApiResponse(description="Não autenticado."),
+            403: OpenApiResponse(description="Não autorizado — requer perfil ADMIN."),
+            404: OpenApiResponse(description="Produto não encontrado."),
+        },
+    )
+    def put(self, request, pk):
+        product = get_object_or_404(Product, pk=pk)
+        serializer = ProductWriteSerializer(product, data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"error": "Dados inválidos.", "details": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        product = serializer.save()
+        return Response(
+            ProductDetailSerializer(product, context={"request": request}).data
+        )
+
+    @extend_schema(
+        tags=["Products"],
+        summary="Remover produto",
+        description="Remove o produto. Variações e imagens vão junto (CASCADE).",
+        responses={
+            204: OpenApiResponse(description="Produto removido."),
+            401: OpenApiResponse(description="Não autenticado."),
+            403: OpenApiResponse(description="Não autorizado — requer perfil ADMIN."),
+            404: OpenApiResponse(description="Produto não encontrado."),
+        },
+    )
+    def delete(self, request, pk):
+        product = get_object_or_404(Product, pk=pk)
+        logger.info(f"Produto removido: {product.name} ({product.id})")
+        product.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ─── Variations ───────────────────────────────────────────────────────────────
+
+
+class ProductVariationCreateView(APIView):
+    """Cria variação para um produto. Admin only."""
+
+    permission_classes = [IsAdminRole]
+    serializer_class = ProductVariationSerializer
+
+    @extend_schema(
+        tags=["Products"],
+        summary="Adicionar variação",
+        description="Cria uma variação para o produto. Requer perfil ADMIN.",
+        request=ProductVariationSerializer,
+        responses={
+            201: ProductVariationSerializer,
+            400: OpenApiResponse(description="Dados inválidos (ex: SKU duplicado)."),
+            401: OpenApiResponse(description="Não autenticado."),
+            403: OpenApiResponse(description="Não autorizado — requer perfil ADMIN."),
+            404: OpenApiResponse(description="Produto não encontrado."),
+        },
+    )
+    def post(self, request, pk):
+        product = get_object_or_404(Product, pk=pk)
+        serializer = ProductVariationSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"error": "Dados inválidos.", "details": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        variation = serializer.save(product=product)
+        logger.info(f"Variação criada: {variation.sku} no produto {product.id}")
+        return Response(
+            ProductVariationSerializer(variation).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class ProductVariationDetailView(APIView):
+    """Update e delete de variação. Admin only."""
+
+    permission_classes = [IsAdminRole]
+    serializer_class = ProductVariationSerializer
+
+    @extend_schema(
+        tags=["Products"],
+        summary="Atualizar variação (PUT)",
+        request=ProductVariationSerializer,
+        responses={
+            200: ProductVariationSerializer,
+            400: OpenApiResponse(description="Dados inválidos."),
+            401: OpenApiResponse(description="Não autenticado."),
+            403: OpenApiResponse(description="Não autorizado — requer perfil ADMIN."),
+            404: OpenApiResponse(description="Variação não encontrada."),
+        },
+    )
+    def put(self, request, pk):
+        variation = get_object_or_404(ProductVariation, pk=pk)
+        serializer = ProductVariationSerializer(variation, data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"error": "Dados inválidos.", "details": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        serializer.save()
+        return Response(serializer.data)
+
+    @extend_schema(
+        tags=["Products"],
+        summary="Remover variação",
+        description=(
+            "Remove a variação. ⚠️ Itens em carrinhos ativos referenciando esta variação "
+            "serão removidos em CASCADE."
+        ),
+        responses={
+            204: OpenApiResponse(description="Variação removida."),
+            401: OpenApiResponse(description="Não autenticado."),
+            403: OpenApiResponse(description="Não autorizado — requer perfil ADMIN."),
+            404: OpenApiResponse(description="Variação não encontrada."),
+        },
+    )
+    def delete(self, request, pk):
+        variation = get_object_or_404(ProductVariation, pk=pk)
+        logger.info(f"Variação removida: {variation.sku} ({variation.id})")
+        variation.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ─── Images ───────────────────────────────────────────────────────────────────
+
+
+class ProductImageCreateView(APIView):
+    """Cria imagem com display_order automático = max+1."""
+
+    parser_classes = [MultiPartParser, FormParser]
+    permission_classes = [IsAdminRole]
+    serializer_class = ProductImageSerializer
+
+    @extend_schema(
+        tags=["Products"],
+        summary="Adicionar imagem ao produto",
+        operation_id="catalog_product_image_create",
+        description=(
+            "Sobe nova imagem. O `display_order` é calculado pelo servidor "
+            "(`max + 1` por produto, começando em 1).\n\n"
+            "Multipart. Formatos: jpg, jpeg, png, webp. Tamanho máx: 5MB."
+        ),
+        request={"multipart/form-data": ProductImageSerializer},
+        responses={
+            201: ProductImageSerializer,
+            400: OpenApiResponse(description="Imagem inválida (formato ou tamanho)."),
+            401: OpenApiResponse(description="Não autenticado."),
+            403: OpenApiResponse(description="Não autorizado — requer perfil ADMIN."),
+            404: OpenApiResponse(description="Produto não encontrado."),
+        },
+    )
+    def put(self, request, product_id):
+        product = get_object_or_404(Product, pk=product_id)
+        serializer = ProductImageSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"error": "Dados inválidos.", "details": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        max_order = product.images.aggregate(Max("display_order"))["display_order__max"] or 0
+        image = serializer.save(product=product, display_order=max_order + 1)
+        logger.info(f"Imagem criada para produto {product.id}: ordem {image.display_order}")
+        return Response(
+            ProductImageSerializer(image, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class ProductImageUpdateView(APIView):
+    """Substitui o binário de uma imagem existente. display_order é preservado."""
+
+    parser_classes = [MultiPartParser, FormParser]
+    permission_classes = [IsAdminRole]
+    serializer_class = ProductImageSerializer
+
+    @extend_schema(
+        tags=["Products"],
+        summary="Substituir imagem do produto",
+        operation_id="catalog_product_image_update",
+        description=(
+            "Substitui o arquivo binário da imagem identificada por `image_id`. "
+            "O `display_order` original é mantido. O arquivo antigo é apagado do storage."
+        ),
+        request={"multipart/form-data": ProductImageSerializer},
+        responses={
+            200: ProductImageSerializer,
+            400: OpenApiResponse(description="Imagem inválida (formato ou tamanho)."),
+            401: OpenApiResponse(description="Não autenticado."),
+            403: OpenApiResponse(description="Não autorizado — requer perfil ADMIN."),
+            404: OpenApiResponse(description="Produto ou imagem não encontrado."),
+        },
+    )
+    def put(self, request, product_id, image_id):
+        product = get_object_or_404(Product, pk=product_id)
+        image = get_object_or_404(ProductImage, pk=image_id, product=product)
+        serializer = ProductImageSerializer(image, data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"error": "Dados inválidos.", "details": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        new_image = serializer.validated_data.get("image")
+        if new_image and image.image and new_image != image.image:
+            image.image.delete(save=False)
+        updated = serializer.save()
+        return Response(
+            ProductImageSerializer(updated, context={"request": request}).data
+        )
+
+
+class ProductImageDeleteView(APIView):
+    """Remove uma imagem de produto. Admin only."""
+
+    permission_classes = [IsAdminRole]
+    serializer_class = ProductImageSerializer
+
+    @extend_schema(
+        tags=["Products"],
+        summary="Remover imagem do produto",
+        description="Remove a imagem e apaga o arquivo do storage.",
+        responses={
+            204: OpenApiResponse(description="Imagem removida."),
+            401: OpenApiResponse(description="Não autenticado."),
+            403: OpenApiResponse(description="Não autorizado — requer perfil ADMIN."),
+            404: OpenApiResponse(description="Imagem não encontrada."),
+        },
+    )
+    def delete(self, request, pk):
+        image = get_object_or_404(ProductImage, pk=pk)
+        logger.info(f"Imagem removida: {image.id} (produto {image.product_id})")
+        image.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ─── Stock ────────────────────────────────────────────────────────────────────
+
+
+class StockMovementListCreateView(APIView):
+    """Histórico e registro de movimentações de estoque de uma variação."""
+
+    permission_classes = [IsAdminRole]
+    serializer_class = StockMovementSerializer
+
+    def _get_variation(self, variation_id, lock=False):
+        qs = ProductVariation.objects.all()
+        if lock:
+            qs = qs.select_for_update()
+        return get_object_or_404(qs, pk=variation_id)
+
+    @extend_schema(
+        tags=["Stock"],
+        summary="Listar movimentações da variação",
+        description="Histórico paginado, ordenado por `-created_at`.",
+        responses={
+            200: StockMovementSerializer(many=True),
+            401: OpenApiResponse(description="Não autenticado."),
+            403: OpenApiResponse(description="Não autorizado — requer perfil ADMIN."),
+            404: OpenApiResponse(description="Variação não encontrada."),
+        },
+    )
+    def get(self, request, variation_id):
+        variation = self._get_variation(variation_id)
+        qs = variation.stock_movements.all()
+        paginator = PageNumberPagination()
+        page = paginator.paginate_queryset(qs, request, view=self)
+        serializer = StockMovementSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
+
+    @extend_schema(
+        tags=["Stock"],
+        summary="Registrar movimentação",
+        description=(
+            "Cria uma movimentação e ajusta `ProductVariation.stock_quantity` "
+            "atomicamente.\n\n"
+            "- `kind=ENTRADA`: soma `quantity` ao estoque.\n"
+            "- `kind=SAIDA`: subtrai. Se o resultado ficaria negativo, retorna 400."
+        ),
+        request=StockMovementSerializer,
+        responses={
+            201: StockMovementSerializer,
+            400: OpenApiResponse(description="Dados inválidos ou saída supera o estoque."),
+            401: OpenApiResponse(description="Não autenticado."),
+            403: OpenApiResponse(description="Não autorizado — requer perfil ADMIN."),
+            404: OpenApiResponse(description="Variação não encontrada."),
+        },
+    )
+    def post(self, request, variation_id):
+        with transaction.atomic():
+            variation = self._get_variation(variation_id, lock=True)
+            serializer = StockMovementSerializer(
+                data=request.data, context={"variation": variation}
+            )
+            if not serializer.is_valid():
+                return Response(
+                    {"error": "Dados inválidos.", "details": serializer.errors},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            movement = serializer.save(variation=variation, created_by=request.user)
+            if movement.kind == StockMovementKind.ENTRADA:
+                variation.stock_quantity += movement.quantity
+            else:
+                variation.stock_quantity -= movement.quantity
+            variation.save(update_fields=["stock_quantity", "updated_at"])
+
+        logger.info(
+            f"StockMovement {movement.kind} {movement.quantity} na variação {variation.id}"
+        )
+        return Response(
+            StockMovementSerializer(movement).data,
+            status=status.HTTP_201_CREATED,
+        )

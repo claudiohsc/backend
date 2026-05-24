@@ -6,6 +6,14 @@ from .views import (
     DropCampaignDetailView,
     DropCampaignListCreateView,
     DropProductManageView,
+    ProductDetailView,
+    ProductImageCreateView,
+    ProductImageDeleteView,
+    ProductImageUpdateView,
+    ProductListCreateView,
+    ProductVariationCreateView,
+    ProductVariationDetailView,
+    StockMovementListCreateView,
     inventory_summary,
 )
 
@@ -42,6 +50,55 @@ urlpatterns = [
         "drops/<uuid:drop_id>/products/<uuid:product_id>/",
         DropProductManageView.as_view(),
         name="drop-product-manage",
+    ),
+
+    # GET (público) - Lista produtos / POST (admin) - Cria produto
+    path(
+        "products/",
+        ProductListCreateView.as_view(),
+        name="product-list-create",
+    ),
+    # GET (público) - Detalhe / PUT, DELETE (admin)
+    path(
+        "products/<uuid:pk>/",
+        ProductDetailView.as_view(),
+        name="product-detail",
+    ),
+    # POST (admin) - Cria variação no produto
+    path(
+        "products/<uuid:pk>/variations/",
+        ProductVariationCreateView.as_view(),
+        name="product-variation-create",
+    ),
+    # PUT, DELETE (admin) - Atualiza/remove variação
+    path(
+        "variations/<uuid:pk>/",
+        ProductVariationDetailView.as_view(),
+        name="variation-detail",
+    ),
+    # PUT (admin, multipart) - Cria imagem (display_order auto)
+    path(
+        "products/<uuid:product_id>/images/",
+        ProductImageCreateView.as_view(),
+        name="product-image-create",
+    ),
+    # PUT (admin, multipart) - Substitui binário da imagem
+    path(
+        "products/<uuid:product_id>/images/<uuid:image_id>/",
+        ProductImageUpdateView.as_view(),
+        name="product-image-update",
+    ),
+    # DELETE (admin) - Remove imagem
+    path(
+        "images/<uuid:pk>/",
+        ProductImageDeleteView.as_view(),
+        name="image-delete",
+    ),
+    # GET, POST (admin) - Histórico e registro de movimentação de estoque
+    path(
+        "variations/<uuid:variation_id>/stock-movements/",
+        StockMovementListCreateView.as_view(),
+        name="variation-stock-movements",
     ),
 
     # GET - Resumo de stock (legado)
