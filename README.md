@@ -35,6 +35,27 @@ cp .env.example .env
 chmod +x entrypoint.sh
 ```
 
+## Comandos do dia a dia (Makefile)
+
+Todos os targets rodam dentro do container `backend`:
+
+| Comando | O que faz |
+|---------|-----------|
+| `make help` | Lista todos os targets disponíveis |
+| `make run` | Sobe os containers (`docker compose up`) |
+| `make migrate` | Aplica migrations pendentes |
+| `make makemigrations` | Gera novas migrations |
+| `make shell` | Abre o `python manage.py shell` |
+| `make check` | Roda `python manage.py check` |
+| `make test` | Roda a suite de testes com `pytest -v` |
+| `make test-cov` | Roda testes e gera relatório HTML de coverage |
+| `make lint` | Verifica `ruff check` + `ruff format` (sem alterar arquivos) |
+| `make format` | Corrige com `ruff --fix` e formata com `ruff format` |
+| `make schema-validate` | Valida o schema OpenAPI (`spectacular --validate --fail-on-warn`) |
+| `make ci` | **Gate de PR:** `lint` + `test` + `schema-validate` |
+| `make install` | Reinstala `requirements.txt` no container |
+
+
 ## Executando com Docker
 
 O modo recomendado é rodar a aplicação via Docker Compose.
@@ -45,38 +66,6 @@ docker compose up --build
 
 O container já executa as migrações e cria o administrador automaticamente.
 
-## Executando localmente
-
-1. Crie e ative um ambiente virtual:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-2. Instale as dependências:
-
-```bash
-pip install -r requirements.txt
-```
-
-3. Execute migrações:
-
-```bash
-python manage.py migrate
-```
-
-4. Crie o superusuário com base nas variáveis de ambiente:
-
-```bash
-python manage.py initadmin
-```
-
-5. Inicie o servidor:
-
-```bash
-python manage.py runserver 0.0.0.0:8000
-```
 
 ## Variáveis de ambiente importantes
 
@@ -106,12 +95,20 @@ A resposta inclui `access`, `refresh`, `user` e `is_new_user`.
 Execute os testes com:
 
 ```bash
-python manage.py test
+make test
 ```
+
+Para gerar um relatório HTML de coverage em `htmlcov/`:
+
+```bash
+make test-cov
+```
+
+Os testes rodam via `pytest-django` apontando para `core.settings.test`, que usa SQLite em memória — sem necessidade do PostgreSQL ativo.
 
 ## Observações de arquitetura
 
 - `authentication` contém o custom user model e a regra de negócio de login Google.
-- `core/settings` é dividido em `base`, `dev` e `prod`.
+- `core/settings` é dividido em `base`, `dev`, `prod` e `test` (SQLite em memória, usado pelo pytest).
 - `base.py` define o modelo de usuário customizado `AUTH_USER_MODEL = "authentication.User"`.
 - `entrypoint.sh` aplica migrações e cria o administrador antes de iniciar o serviço.
