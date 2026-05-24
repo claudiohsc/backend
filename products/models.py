@@ -1,4 +1,5 @@
 import uuid
+from django.core.validators import FileExtensionValidator
 from django.db import models
 
 class Category(models.Model):
@@ -17,6 +18,18 @@ class Category(models.Model):
 class DropCampaign(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255)
+    slug = models.SlugField(max_length=255, unique=True)
+    description = models.TextField(blank=True)
+    is_public = models.BooleanField(default=True, verbose_name="Drop público")
+    banner = models.ImageField(
+        upload_to="drops/banners/",
+        null=True,
+        blank=True,
+        verbose_name="Banner da campanha",
+        validators=[
+            FileExtensionValidator(allowed_extensions=["jpg", "jpeg", "png", "webp"])
+        ],
+    )
     launch_date = models.DateTimeField(null=True, blank=True)
     end_date = models.DateTimeField(null=True, blank=True)
     max_quantity = models.IntegerField(null=True, blank=True)
@@ -26,6 +39,11 @@ class DropCampaign(models.Model):
 
     def __str__(self):
         return self.name
+
+    def delete(self, *args, **kwargs):
+        if self.banner:
+            self.banner.delete(save=False)
+        return super().delete(*args, **kwargs)
 
 class Product(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

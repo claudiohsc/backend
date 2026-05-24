@@ -258,6 +258,10 @@ SPECTACULAR_SETTINGS = {
             "name": "Categories",
             "description": "Gestão e listagem de categorias de produtos.",
         },
+        {
+            "name": "Drops",
+            "description": "Gestão e listagem de campanhas de drop.",
+        },
     ],
 
     # Swagger UI — aparência e comportamento
