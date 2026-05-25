@@ -36,7 +36,6 @@ INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.staticfiles',
     'authentication',
-    'base',
     'products',
     'orders',
     'dashboard',
