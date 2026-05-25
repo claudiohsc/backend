@@ -12,6 +12,8 @@ urlpatterns = [
     path("api/auth/", include("authentication.urls", namespace="authentication")),
     path("api/", include("base.urls")),
     path("api/products/", include("products.urls")),path("api/dashboard/", include("dashboard.urls")),
+    path("api/products/", include("products.urls")),
+
 ]
 
 urlpatterns += [
