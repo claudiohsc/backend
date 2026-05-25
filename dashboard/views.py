@@ -6,7 +6,7 @@ from django.utils import timezone
 from django.contrib.auth import get_user_model
 import datetime
 
-from authentication.permissions import IsAdminUser
+from authentication.permissions import IsAdmin
 from orders.models import CustomerOrder, OrderStatus
 from products.models import ProductVariation
 
@@ -17,7 +17,7 @@ class AdminDashboardView(APIView):
     Endpoint consolidado para o Dashboard Administrativo (UC05).
     Utiliza os campos nativos do Django (is_staff) para distinguir admins de clientes.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdmin]
 
     def get(self, request):
         thirty_days_ago = timezone.now() - datetime.timedelta(days=30)
@@ -39,7 +39,11 @@ class AdminDashboardView(APIView):
             created_at__gte=thirty_days_ago
         ).count()
 
-        recent_orders_qs = CustomerOrder.objects.all().order_by('-created_at')[:10]
+        recent_orders_qs = (
+            CustomerOrder.objects
+            .select_related('user')
+            .order_by('-created_at')[:10]
+        )
         recent_orders = [
             {
                 "id": str(order.id),
