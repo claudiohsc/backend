@@ -2,7 +2,7 @@
 
 ## Visão Geral
 
-Este repositório contém o backend Django da aplicação, com autenticação JWT e suporte a login via Google OAuth. A arquitetura segue a estrutura por apps Django, mantendo a separação entre `base`, `products` e `authentication`.
+Este repositório contém o backend Django da aplicação, com autenticação JWT e suporte a login via Google OAuth. A arquitetura segue a estrutura por apps Django, mantendo a separação entre `orders`, `products` e `authentication`.
 
 ## Pré-requisitos
 
@@ -110,5 +110,4 @@ Os testes rodam via `pytest-django` apontando para `core.settings.test`, que usa
 
 - `authentication` contém o custom user model e a regra de negócio de login Google.
 - `core/settings` é dividido em `base`, `dev`, `prod` e `test` (SQLite em memória, usado pelo pytest).
-- `base.py` define o modelo de usuário customizado `AUTH_USER_MODEL = "authentication.User"`.
 - `entrypoint.sh` aplica migrações e cria o administrador antes de iniciar o serviço.
