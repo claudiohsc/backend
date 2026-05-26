@@ -37,9 +37,9 @@ User = get_user_model()
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def make_user(email, role=UserRole.CUSTOMER, name="User"):
+def make_user(email, role=UserRole.CUSTOMER, name="User", is_staff=False):
     """Cria um utilizador com perfil associado para uso nos testes."""
-    user = User.objects.create_user(email=email, name=name)
+    user = User.objects.create_user(email=email, name=name, is_staff=is_staff)
     UserProfile.objects.create(user=user, role=role)
     return user
 
@@ -73,7 +73,7 @@ class CategoryListCreateTests(APITestCase):
     url = "/api/catalog/categories/"
 
     def setUp(self):
-        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin")
+        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True)
         self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
         Category.objects.create(name="Camisetas", slug="camisetas")
         Category.objects.create(name="Bonés", slug="bones")
@@ -141,7 +141,7 @@ class CategoryDetailTests(APITestCase):
     """Testes para GET/PUT/DELETE /api/catalog/categories/{id}/."""
 
     def setUp(self):
-        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin")
+        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True)
         self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
         self.category = Category.objects.create(name="Camisetas", slug="camisetas")
         self.url = f"/api/catalog/categories/{self.category.id}/"
@@ -221,7 +221,7 @@ class DropCampaignListCreateTests(APITestCase):
     url = "/api/catalog/drops/"
 
     def setUp(self):
-        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin")
+        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True)
         self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
         now = timezone.now()
         DropCampaign.objects.create(
@@ -385,7 +385,7 @@ class DropCampaignDetailTests(APITestCase):
     """Testes para GET/PUT/DELETE /api/catalog/drops/{id}/."""
 
     def setUp(self):
-        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin")
+        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True)
         self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
         self.drop = DropCampaign.objects.create(
             name="Verão 2026", slug="verao-2026", is_active=True
@@ -480,7 +480,7 @@ class DropProductManageTests(APITestCase):
     """Testes para POST/DELETE /api/catalog/drops/{drop_id}/products/{product_id}/."""
 
     def setUp(self):
-        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin")
+        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True)
         self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
         self.drop = DropCampaign.objects.create(name="Verão", slug="verao", is_active=True)
         self.outro_drop = DropCampaign.objects.create(name="Outro", slug="outro")
@@ -555,7 +555,7 @@ class ProductListTests(APITestCase):
     url = "/api/catalog/products/"
 
     def setUp(self):
-        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin")
+        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True)
         self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
         self.category = Category.objects.create(name="Camisetas", slug="camisetas")
         self.drop = DropCampaign.objects.create(name="Verão", slug="verao", is_active=True)
@@ -614,7 +614,7 @@ class ProductDetailTests(APITestCase):
     """Testes para GET /api/catalog/products/{id}/."""
 
     def setUp(self):
-        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin")
+        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True)
         self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
         self.product = make_product(name="Camiseta")
         self.inativo = make_product(name="Inativo", is_active=False)
@@ -657,7 +657,7 @@ class ProductCreateTests(APITestCase):
     url = "/api/catalog/products/"
 
     def setUp(self):
-        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin")
+        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True)
         self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
 
     def test_admin_cria_produto_simples(self):
@@ -734,7 +734,7 @@ class ProductCreateTests(APITestCase):
 
 class ProductUpdateTests(APITestCase):
     def setUp(self):
-        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin")
+        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True)
         self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
         self.product = make_product(name="Old")
         self.url = f"/api/catalog/products/{self.product.id}/"
@@ -761,7 +761,7 @@ class ProductUpdateTests(APITestCase):
 
 class ProductDeleteTests(APITestCase):
     def setUp(self):
-        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin")
+        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True)
         self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
         self.product = make_product()
         self.url = f"/api/catalog/products/{self.product.id}/"
@@ -781,7 +781,7 @@ class ProductDeleteTests(APITestCase):
 
 class VariationCRUDTests(APITestCase):
     def setUp(self):
-        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin")
+        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True)
         self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
         self.product = make_product()
         self.variation = ProductVariation.objects.create(
@@ -850,7 +850,7 @@ def make_product_image_file(name="img.jpg"):
 
 class ImagePersistTests(APITestCase):
     def setUp(self):
-        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin")
+        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True)
         self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
         self.product = make_product()
         self.create_url = f"/api/catalog/products/{self.product.id}/images/"
@@ -942,7 +942,7 @@ class ImagePersistTests(APITestCase):
 
 class StockMovementTests(APITestCase):
     def setUp(self):
-        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin")
+        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True)
         self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
         self.product = make_product()
         self.variation = ProductVariation.objects.create(

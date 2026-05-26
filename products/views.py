@@ -14,8 +14,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from authentication.models import UserProfile, UserRole
-from authentication.permissions import IsAdminRole
+from authentication.permissions import IsStaffOrSuperuser
 
 from .models import (
     Category,
@@ -38,15 +37,6 @@ from .serializers import (
     StockMovementSerializer,
 )
 
-
-def _is_admin(request):
-    user = request.user
-    if not user or not user.is_authenticated:
-        return False
-    try:
-        return user.profile.role == UserRole.ADMIN
-    except UserProfile.DoesNotExist:
-        return False
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +61,7 @@ class CategoryListCreateView(APIView):
 
     def get_permissions(self):
         if self.request.method == "POST":
-            return [IsAdminRole()]
+            return [IsStaffOrSuperuser()]
         return [AllowAny()]
 
     @extend_schema(
@@ -123,7 +113,7 @@ class CategoryDetailView(APIView):
     def get_permissions(self):
         if self.request.method == "GET":
             return [AllowAny()]
-        return [IsAdminRole()]
+        return [IsStaffOrSuperuser()]
 
     def _get_object(self, pk):
         return get_object_or_404(Category, pk=pk)
@@ -194,7 +184,7 @@ class DropCampaignListCreateView(APIView):
 
     def get_permissions(self):
         if self.request.method == "POST":
-            return [IsAdminRole()]
+            return [IsStaffOrSuperuser()]
         return [AllowAny()]
 
     @extend_schema(
@@ -259,7 +249,7 @@ class DropCampaignDetailView(APIView):
     def get_permissions(self):
         if self.request.method == "GET":
             return [AllowAny()]
-        return [IsAdminRole()]
+        return [IsStaffOrSuperuser()]
 
     def _get_object(self, pk):
         return get_object_or_404(DropCampaign, pk=pk)
@@ -329,7 +319,7 @@ class DropCampaignDetailView(APIView):
 class DropProductManageView(APIView):
     """Associar e desassociar um produto de um drop. Admin only."""
 
-    permission_classes = [IsAdminRole]
+    permission_classes = [IsStaffOrSuperuser]
     serializer_class = DropCampaignDetailSerializer
 
     def _get_drop(self, drop_id):
@@ -402,7 +392,7 @@ class ProductListCreateView(APIView):
 
     def get_permissions(self):
         if self.request.method == "POST":
-            return [IsAdminRole()]
+            return [IsStaffOrSuperuser()]
         return [AllowAny()]
 
     def get_serializer_class(self):
@@ -425,7 +415,7 @@ class ProductListCreateView(APIView):
             "variations", "images"
         )
 
-        is_admin = _is_admin(request)
+        is_admin = request.user.is_authenticated and (request.user.is_staff or request.user.is_superuser)
         is_active_param = request.query_params.get("is_active")
         if is_admin and is_active_param is not None:
             qs = qs.filter(is_active=is_active_param.lower() == "true")
@@ -487,7 +477,7 @@ class ProductDetailView(APIView):
     def get_permissions(self):
         if self.request.method == "GET":
             return [AllowAny()]
-        return [IsAdminRole()]
+        return [IsStaffOrSuperuser()]
 
     def get_serializer_class(self):
         return ProductWriteSerializer if self.request.method == "PUT" else ProductDetailSerializer
@@ -499,7 +489,8 @@ class ProductDetailView(APIView):
             ),
             pk=pk,
         )
-        if not product.is_active and not (_is_admin(request) and allow_inactive_for_admin):
+        is_admin = request.user.is_authenticated and (request.user.is_staff or request.user.is_superuser)
+        if not product.is_active and not (is_admin and allow_inactive_for_admin):
             raise Product.DoesNotExist
         return product
 
@@ -580,7 +571,7 @@ class ProductDetailView(APIView):
 class ProductVariationCreateView(APIView):
     """Cria variação para um produto. Admin only."""
 
-    permission_classes = [IsAdminRole]
+    permission_classes = [IsStaffOrSuperuser]
     serializer_class = ProductVariationSerializer
 
     @extend_schema(
@@ -615,7 +606,7 @@ class ProductVariationCreateView(APIView):
 class ProductVariationDetailView(APIView):
     """Update e delete de variação. Admin only."""
 
-    permission_classes = [IsAdminRole]
+    permission_classes = [IsStaffOrSuperuser]
     serializer_class = ProductVariationSerializer
 
     @extend_schema(
@@ -669,7 +660,7 @@ class ProductImageCreateView(APIView):
     """Cria imagem com display_order automático = max+1."""
 
     parser_classes = [MultiPartParser, FormParser]
-    permission_classes = [IsAdminRole]
+    permission_classes = [IsStaffOrSuperuser]
     serializer_class = ProductImageSerializer
 
     @extend_schema(
@@ -711,7 +702,7 @@ class ProductImageUpdateView(APIView):
     """Substitui o binário de uma imagem existente. display_order é preservado."""
 
     parser_classes = [MultiPartParser, FormParser]
-    permission_classes = [IsAdminRole]
+    permission_classes = [IsStaffOrSuperuser]
     serializer_class = ProductImageSerializer
 
     @extend_schema(
@@ -752,7 +743,7 @@ class ProductImageUpdateView(APIView):
 class ProductImageDeleteView(APIView):
     """Remove uma imagem de produto. Admin only."""
 
-    permission_classes = [IsAdminRole]
+    permission_classes = [IsStaffOrSuperuser]
     serializer_class = ProductImageSerializer
 
     @extend_schema(
@@ -779,7 +770,7 @@ class ProductImageDeleteView(APIView):
 class StockMovementListCreateView(APIView):
     """Histórico e registro de movimentações de estoque de uma variação."""
 
-    permission_classes = [IsAdminRole]
+    permission_classes = [IsStaffOrSuperuser]
     serializer_class = StockMovementSerializer
 
     def _get_variation(self, variation_id, lock=False):

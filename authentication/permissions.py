@@ -1,18 +1,14 @@
-from rest_framework.permissions import BasePermission
-
-from .models import UserProfile, UserRole
+from rest_framework import permissions
 
 
-class IsAdminRole(BasePermission):
-    """Permite apenas utilizadores autenticados com perfil de ADMIN."""
+class IsStaffOrSuperuser(permissions.BasePermission):
+    """Permite acesso apenas a utilizadores administradores (Staff/Superuser)."""
 
-    message = "Apenas administradores podem realizar esta operação."
+    message = "Acesso negado. Apenas administradores podem aceder a este recurso."
 
     def has_permission(self, request, view):
-        user = request.user
-        if not user or not user.is_authenticated:
-            return False
-        try:
-            return user.profile.role == UserRole.ADMIN
-        except UserProfile.DoesNotExist:
-            return False
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and (request.user.is_staff or request.user.is_superuser)
+        )
