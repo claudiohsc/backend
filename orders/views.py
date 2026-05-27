@@ -24,7 +24,7 @@ class AdminDashboardView(APIView):
     Restrito a is_staff ou is_superuser.
     """
 
-    permission_classes = [IsStaffOrSuperuser]
+    permission_classes = [IsStaffOrSuperUser]
 
     @extend_schema(
         description="Endpoint consolidado para o Dashboard Administrativo (UC05).",
@@ -64,7 +64,6 @@ class AdminDashboardView(APIView):
             OrderStatus.DELIVERED,
         ]
 
-        # Resumo de vendas — últimos 30 dias, apenas pedidos válidos
         valid_orders_period = CustomerOrder.objects.filter(
             created_at__gte=thirty_days_ago,
             status__in=active_statuses,
@@ -77,7 +76,6 @@ class AdminDashboardView(APIView):
             round(total_revenue / total_orders, 2) if total_orders > 0 else 0
         )
 
-        # Resumo de clientes
         customer_filter = {"is_staff": False, "is_superuser": False}
         total_clientes = User.objects.filter(**customer_filter).count()
         novos_clientes = User.objects.filter(
@@ -85,7 +83,6 @@ class AdminDashboardView(APIView):
             created_at__gte=thirty_days_ago,
         ).count()
 
-        # Pedidos recentes — apenas válidos, sem N+1, limite 10
         recent_orders_qs = (
             CustomerOrder.objects.filter(status__in=active_statuses)
             .select_related("user")
@@ -93,7 +90,6 @@ class AdminDashboardView(APIView):
         )
         recent_orders = DashboardRecentOrderSerializer(recent_orders_qs, many=True).data
 
-        # Alertas de stock baixo — ordenados por stock crescente, limite 50
         low_stock_qs = (
             ProductVariation.objects.filter(stock_quantity__lt=10)
             .select_related("product")

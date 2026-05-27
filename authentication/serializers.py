@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from .models import User
+from orders.models import CustomerOrder
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -57,3 +58,40 @@ class LogoutInputSerializer(serializers.Serializer):
             "Após este pedido, o token fica na blacklist e não pode mais ser usado."
         ),
     )
+
+class CustomerOrderHistorySerializer(serializers.ModelSerializer):
+    """Serializer do histórico de compras para o CRM."""
+    class Meta:
+        model = CustomerOrder
+        fields = ["id", "status", "total_amount", "created_at", "tracking_code"]
+
+
+class CustomerCRMSerializer(serializers.ModelSerializer):
+    """Serializer da listagem principal de clientes com métricas de CRM."""
+    total_orders = serializers.IntegerField(read_only=True)
+    total_spent = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    last_purchase_date = serializers.DateTimeField(read_only=True)
+    
+    class Meta:
+        model = User
+        fields = [
+            "id", 
+            "email", 
+            "name", 
+            "created_at", 
+            "total_orders", 
+            "total_spent", 
+            "last_purchase_date"
+        ]
+
+
+class CustomerCRMDetailSerializer(CustomerCRMSerializer):
+    """Serializer dos detalhes do cliente, incluindo histórico completo."""
+    order_history = serializers.SerializerMethodField()
+
+    class Meta(CustomerCRMSerializer.Meta):
+        fields = CustomerCRMSerializer.Meta.fields + ["order_history"]
+
+    def get_order_history(self, obj):
+        orders = obj.orders.all().order_by('-created_at')
+        return CustomerOrderHistorySerializer(orders, many=True).data
