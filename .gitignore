@@ -207,7 +207,7 @@ marimo/_lsp/
 __marimo__/
 staticfiles/
 AUTHENTICATION_README.md
-
-# Media uploads (dev local — em prod usar S3/Cloudinary)
+secret.json
+schema.yml
 mediafiles/*
 !mediafiles/.gitkeep
