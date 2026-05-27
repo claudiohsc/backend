@@ -1,10 +1,13 @@
 from rest_framework import serializers
+
+from orders.models import CustomerOrder
+
 from .models import User
 
 
 class UserSerializer(serializers.ModelSerializer):
     """Serializer completo do utilizador para respostas da API."""
- 
+
     class Meta:
         model = User
         fields = [
@@ -17,27 +20,27 @@ class UserSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = fields
- 
- 
+
+
 class GoogleAuthSerializer(serializers.Serializer):
     """Valida o payload de login com Google."""
- 
+
     id_token = serializers.CharField(
         required=True,
         help_text="Token de ID retornado pelo Google Sign-In (credencial JWT).",
     )
- 
- 
+
+
 class AuthResponseSerializer(serializers.Serializer):
     """Contrato da resposta do endpoint de autenticação (documentação)."""
- 
+
     access = serializers.CharField(read_only=True)
     refresh = serializers.CharField(read_only=True)
     user = UserSerializer(read_only=True)
     is_new_user = serializers.BooleanField(read_only=True)
 
+
 class TokenRefreshInputSerializer(serializers.Serializer):
- 
     refresh = serializers.CharField(
         required=True,
         help_text=(
@@ -46,10 +49,9 @@ class TokenRefreshInputSerializer(serializers.Serializer):
             "Após uso, o token antigo é invalidado e um novo é emitido (rotation)."
         ),
     )
- 
- 
+
+
 class LogoutInputSerializer(serializers.Serializer):
- 
     refresh = serializers.CharField(
         required=True,
         help_text=(
@@ -57,3 +59,46 @@ class LogoutInputSerializer(serializers.Serializer):
             "Após este pedido, o token fica na blacklist e não pode mais ser usado."
         ),
     )
+
+
+class CustomerOrderHistorySerializer(serializers.ModelSerializer):
+    """Serializer do histórico de compras para o CRM."""
+
+    class Meta:
+        model = CustomerOrder
+        fields = ["id", "status", "total_amount", "created_at", "tracking_code"]
+
+
+class CustomerCRMSerializer(serializers.ModelSerializer):
+    """Serializer da listagem principal de clientes com métricas de CRM."""
+
+    total_orders = serializers.IntegerField(read_only=True)
+    total_spent = serializers.DecimalField(
+        max_digits=10, decimal_places=2, read_only=True
+    )
+    last_purchase_date = serializers.DateTimeField(read_only=True)
+
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "email",
+            "name",
+            "created_at",
+            "total_orders",
+            "total_spent",
+            "last_purchase_date",
+        ]
+
+
+class CustomerCRMDetailSerializer(CustomerCRMSerializer):
+    """Serializer dos detalhes do cliente, incluindo histórico completo."""
+
+    order_history = serializers.SerializerMethodField()
+
+    class Meta(CustomerCRMSerializer.Meta):
+        fields = CustomerCRMSerializer.Meta.fields + ["order_history"]
+
+    def get_order_history(self, obj) -> list:
+        orders = obj.orders.all().order_by("-created_at")
+        return CustomerOrderHistorySerializer(orders, many=True).data

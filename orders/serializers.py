@@ -1,8 +1,9 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
-from .models import CustomerOrder
 from products.models import ProductVariation
+
+from .models import CustomerOrder
 
 User = get_user_model()
 
@@ -14,7 +15,7 @@ class DashboardRecentOrderSerializer(serializers.ModelSerializer):
         model = CustomerOrder
         fields = ["id", "customer_name", "total_amount", "status", "created_at"]
 
-    def get_customer_name(self, obj):
+    def get_customer_name(self, obj) -> str:
         return getattr(obj.user, "name", None) or obj.user.email
 
 

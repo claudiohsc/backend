@@ -4,18 +4,21 @@ from django.contrib.auth import get_user_model
 from django.db.models import Sum
 from django.utils import timezone
 from django.db import transaction
-from rest_framework import status
+from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes, OpenApiExample
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes, OpenApiExample, inline_serializer
 
-from authentication.permissions import IsStaffOrSuperuser
+
+from authentication.permissions import IsStaffOrSuperUser
+from products.models import ProductVariation
 
 from .models import CustomerOrder, OrderStatus, Cart, OrderItem, PaymentStatus, Payment
 from .serializers import DashboardLowStockSerializer, DashboardRecentOrderSerializer
 from products.models import ProductVariation
 from .services import create_infinitepay_checkout, check_payment_status
+
 
 User = get_user_model()
 
@@ -27,11 +30,39 @@ class AdminDashboardView(APIView):
     Restrito a is_staff ou is_superuser.
     """
 
-    permission_classes = [IsStaffOrSuperuser]
+    permission_classes = [IsStaffOrSuperUser]
 
     @extend_schema(
         description="Endpoint consolidado para o Dashboard Administrativo (UC05).",
-        responses={200: "Resumo do dashboard administrativo."}
+        responses={
+            200: inline_serializer(
+                name="DashboardSummaryResponse",
+                fields={
+                    "sales_summary": inline_serializer(
+                        name="DashboardSalesSummary",
+                        fields={
+                            "period_days": serializers.IntegerField(),
+                            "total_revenue": serializers.DecimalField(
+                                max_digits=10, decimal_places=2
+                            ),
+                            "total_orders": serializers.IntegerField(),
+                            "average_ticket": serializers.DecimalField(
+                                max_digits=10, decimal_places=2
+                            ),
+                        },
+                    ),
+                    "customers_summary": inline_serializer(
+                        name="DashboardCustomersSummary",
+                        fields={
+                            "total_registered": serializers.IntegerField(),
+                            "new_in_period": serializers.IntegerField(),
+                        },
+                    ),
+                    "recent_orders": DashboardRecentOrderSerializer(many=True),
+                    "low_stock_alerts": DashboardLowStockSerializer(many=True),
+                },
+            )
+        },
     )
     def get(self, request):
         thirty_days_ago = timezone.now() - datetime.timedelta(days=30)
@@ -43,18 +74,18 @@ class AdminDashboardView(APIView):
             OrderStatus.DELIVERED,
         ]
 
-        # Resumo de vendas — últimos 30 dias, apenas pedidos válidos
         valid_orders_period = CustomerOrder.objects.filter(
             created_at__gte=thirty_days_ago,
             status__in=active_statuses,
         )
-        total_revenue = valid_orders_period.aggregate(
-            total=Sum("total_amount")
-        )["total"] or 0
+        total_revenue = (
+            valid_orders_period.aggregate(total=Sum("total_amount"))["total"] or 0
+        )
         total_orders = valid_orders_period.count()
-        average_ticket = round(total_revenue / total_orders, 2) if total_orders > 0 else 0
+        average_ticket = (
+            round(total_revenue / total_orders, 2) if total_orders > 0 else 0
+        )
 
-        # Resumo de clientes
         customer_filter = {"is_staff": False, "is_superuser": False}
         total_clientes = User.objects.filter(**customer_filter).count()
         novos_clientes = User.objects.filter(
@@ -62,7 +93,6 @@ class AdminDashboardView(APIView):
             created_at__gte=thirty_days_ago,
         ).count()
 
-        # Pedidos recentes — apenas válidos, sem N+1, limite 10
         recent_orders_qs = (
             CustomerOrder.objects.filter(status__in=active_statuses)
             .select_related("user")
@@ -70,7 +100,6 @@ class AdminDashboardView(APIView):
         )
         recent_orders = DashboardRecentOrderSerializer(recent_orders_qs, many=True).data
 
-        # Alertas de stock baixo — ordenados por stock crescente, limite 50
         low_stock_qs = (
             ProductVariation.objects.filter(stock_quantity__lt=10)
             .select_related("product")
@@ -95,6 +124,7 @@ class AdminDashboardView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
 
 class CheckoutAPIView(APIView):
     permission_classes = [IsAuthenticated]
@@ -244,3 +274,4 @@ class PaymentSuccessRedirectView(APIView):
             return Response({"message": "Pagamento confirmado com sucesso!", "order_id": order_nsu})
         
         return Response({"message": "Pagamento pendente ou em processamento.", "order_id": order_nsu})
+

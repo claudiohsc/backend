@@ -208,3 +208,6 @@ __marimo__/
 staticfiles/
 AUTHENTICATION_README.md
 secret.json
+schema.yml
+mediafiles/*
+!mediafiles/.gitkeep

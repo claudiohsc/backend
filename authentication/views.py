@@ -1,25 +1,30 @@
 import logging
 
 from django.contrib.auth import get_user_model
+from django.db import models
+from django.db.models import Count, Max, Sum
+from django.db.models.functions import Coalesce
+from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import (
     OpenApiExample,
     OpenApiResponse,
     extend_schema,
-    extend_schema_view,
 )
-from .serializers import (
-    GoogleAuthSerializer,
-    LogoutInputSerializer,
-    TokenRefreshInputSerializer,
-    UserSerializer,
-)
-from rest_framework import status
+from rest_framework import filters, status, viewsets
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .serializers import GoogleAuthSerializer, UserSerializer
+from .permissions import IsStaffOrSuperUser
+from .serializers import (
+    CustomerCRMDetailSerializer,
+    CustomerCRMSerializer,
+    GoogleAuthSerializer,
+    LogoutInputSerializer,
+    TokenRefreshInputSerializer,
+    UserSerializer,
+)
 from .services import GoogleAuthService, InvalidGoogleTokenException
 
 logger = logging.getLogger(__name__)
@@ -33,6 +38,7 @@ def get_tokens_for_user(user) -> dict:
         "refresh": str(refresh),
         "access": str(refresh.access_token),
     }
+
 
 _AUTH_SUCCESS_EXAMPLE_NEW = OpenApiExample(
     name="Novo utilizador (201)",
@@ -79,6 +85,7 @@ _AUTH_SUCCESS_EXAMPLE_EXISTING = OpenApiExample(
 
 # ─── Views ────────────────────────────────────────────────────────────────────
 
+
 class GoogleLoginView(APIView):
     """Login com Google OAuth 2.0."""
 
@@ -115,7 +122,10 @@ class GoogleLoginView(APIView):
                 examples=[
                     OpenApiExample(
                         name="Token em falta",
-                        value={"error": "id_token é obrigatório.", "details": {"id_token": ["This field is required."]}},
+                        value={
+                            "error": "id_token é obrigatório.",
+                            "details": {"id_token": ["This field is required."]},
+                        },
                         response_only=True,
                         status_codes=["400"],
                     )
@@ -126,7 +136,10 @@ class GoogleLoginView(APIView):
                 examples=[
                     OpenApiExample(
                         name="Token inválido",
-                        value={"error": "Token Google inválido ou expirado.", "details": "Token invalid: ..."},
+                        value={
+                            "error": "Token Google inválido ou expirado.",
+                            "details": "Token invalid: ...",
+                        },
                         response_only=True,
                         status_codes=["401"],
                     )
@@ -155,7 +168,9 @@ class GoogleLoginView(APIView):
         id_token_str = serializer.validated_data["id_token"]
 
         try:
-            user, is_new_user = GoogleAuthService.authenticate_or_create_user(id_token_str)
+            user, is_new_user = GoogleAuthService.authenticate_or_create_user(
+                id_token_str
+            )
         except InvalidGoogleTokenException as e:
             logger.warning(f"Tentativa de login com token inválido: {e}")
             return Response(
@@ -269,8 +284,12 @@ class LogoutView(APIView):
                     )
                 ],
             ),
-            400: OpenApiResponse(description="Campo `refresh` em falta ou token já expirado"),
-            401: OpenApiResponse(description="Não autenticado — access token inválido ou em falta"),
+            400: OpenApiResponse(
+                description="Campo `refresh` em falta ou token já expirado"
+            ),
+            401: OpenApiResponse(
+                description="Não autenticado — access token inválido ou em falta"
+            ),
         },
         examples=[
             OpenApiExample(
@@ -341,9 +360,59 @@ class MeView(APIView):
                     )
                 ],
             ),
-            401: OpenApiResponse(description="Não autenticado — access token inválido ou em falta"),
+            401: OpenApiResponse(
+                description="Não autenticado — access token inválido ou em falta"
+            ),
         },
     )
     def get(self, request):
         serializer = UserSerializer(request.user)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class CustomerCRMViewSet(viewsets.ReadOnlyModelViewSet):
+    """UC07 – Gerenciar Clientes (CRM)"""
+
+    permission_classes = [IsStaffOrSuperUser]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.OrderingFilter,
+        filters.SearchFilter,
+    ]
+
+    search_fields = ["name", "email"]
+    ordering_fields = [
+        "created_at",
+        "total_orders",
+        "total_spent",
+        "last_purchase_date",
+    ]
+    ordering = ["-created_at"]
+
+    filterset_fields = {
+        "created_at": ["gte", "lte", "exact"],
+    }
+
+    def get_queryset(self):
+        qs = User.objects.filter(profile__role="CUSTOMER").annotate(
+            total_orders=Count("orders"),
+            total_spent=Coalesce(
+                Sum("orders__total_amount"), 0.0, output_field=models.DecimalField()
+            ),
+            last_purchase_date=Max("orders__created_at"),
+        )
+
+        min_freq = self.request.query_params.get("min_frequency")
+        max_freq = self.request.query_params.get("max_frequency")
+
+        if min_freq is not None:
+            qs = qs.filter(total_orders__gte=min_freq)
+        if max_freq is not None:
+            qs = qs.filter(total_orders__lte=max_freq)
+
+        return qs
+
+    def get_serializer_class(self):
+        if self.action == "retrieve":
+            return CustomerCRMDetailSerializer
+        return CustomerCRMSerializer

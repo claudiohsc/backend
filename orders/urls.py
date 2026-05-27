@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import AdminDashboardView, CheckoutAPIView, PaymentSuccessRedirectView
 
+
 app_name = "orders"
 
 urlpatterns = [
