@@ -1,24 +1,26 @@
 import datetime
 
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
-from django.db import transaction
+from drf_spectacular.utils import (
+    OpenApiParameter,
+    OpenApiTypes,
+    extend_schema,
+    inline_serializer,
+)
 from rest_framework import serializers, status
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated, AllowAny
-from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes, OpenApiExample, inline_serializer
-
 
 from authentication.permissions import IsStaffOrSuperUser
 from products.models import ProductVariation
 
-from .models import CustomerOrder, OrderStatus, Cart, OrderItem, PaymentStatus, Payment
+from .models import Cart, CustomerOrder, OrderItem, OrderStatus, PaymentStatus
 from .serializers import DashboardLowStockSerializer, DashboardRecentOrderSerializer
-from products.models import ProductVariation
-from .services import create_infinitepay_checkout, check_payment_status
-
+from .services import check_payment_status, create_infinitepay_checkout
 
 User = get_user_model()
 
@@ -144,36 +146,57 @@ class CheckoutAPIView(APIView):
             "application/json": {
                 "type": "object",
                 "properties": {
-                    "address_id": {"type": "string", "format": "uuid", "description": "UUID do endereço de entrega salvo no perfil"},
-                    "shipping_cost": {"type": "number", "format": "float", "description": "Valor calculado do frete (em Reais)"}
+                    "address_id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "UUID do endereço de entrega salvo no perfil",
+                    },
+                    "shipping_cost": {
+                        "type": "number",
+                        "format": "float",
+                        "description": "Valor calculado do frete (em Reais)",
+                    },
                 },
-                "required": ["address_id"]
+                "required": ["address_id"],
             }
         },
         responses={
             201: OpenApiTypes.OBJECT,
             400: OpenApiTypes.OBJECT,
-            500: OpenApiTypes.OBJECT
-        }
+            500: OpenApiTypes.OBJECT,
+        },
     )
     @transaction.atomic
     def post(self, request):
         user = request.user
-        cart = Cart.objects.filter(user=user, status='ACTIVE').prefetch_related('items__variation__product').first()
+        cart = (
+            Cart.objects.filter(user=user, status="ACTIVE")
+            .prefetch_related("items__variation__product")
+            .first()
+        )
 
         if not cart or not cart.items.exists():
-            return Response({"success": False, "message": "Carrinho vazio."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"success": False, "message": "Carrinho vazio."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        address_id = request.data.get('address_id')
+        address_id = request.data.get("address_id")
         if not address_id:
-            return Response({"success": False, "message": "Endereço não informado."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"success": False, "message": "Endereço não informado."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         address = user.addresses.filter(id=address_id).first()
         if not address:
-            return Response({"success": False, "message": "Endereço inválido."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"success": False, "message": "Endereço inválido."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         subtotal = sum(item.quantity * item.unit_price for item in cart.items.all())
-        shipping_cost = request.data.get('shipping_cost', 0.00)
+        shipping_cost = request.data.get("shipping_cost", 0.00)
         total_amount = float(subtotal) + float(shipping_cost)
 
         order = CustomerOrder.objects.create(
@@ -188,15 +211,18 @@ class CheckoutAPIView(APIView):
             shipping_complement=address.complement,
             shipping_neighborhood=address.neighborhood,
             shipping_city=address.city,
-            shipping_state=address.state
+            shipping_state=address.state,
         )
 
         for item in cart.items.all():
             if item.variation.stock_quantity < item.quantity:
                 transaction.set_rollback(True)
                 return Response(
-                    {"success": False, "message": f"Estoque insuficiente para {item.variation.product.name}."},
-                    status=status.HTTP_400_BAD_REQUEST
+                    {
+                        "success": False,
+                        "message": f"Estoque insuficiente para {item.variation.product.name}.",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
 
             item.variation.stock_quantity -= item.quantity
@@ -208,20 +234,26 @@ class CheckoutAPIView(APIView):
                 quantity=item.quantity,
                 unit_price=item.unit_price,
                 product_name=f"{item.variation.product.name} - {item.variation.size}",
-                sku_snapshot=item.variation.sku
+                sku_snapshot=item.variation.sku,
             )
 
-        cart.status = 'FINISHED'
+        cart.status = "FINISHED"
         cart.save()
 
         try:
             checkout_url = create_infinitepay_checkout(order, request)
-            return Response({"success": True, "checkout_url": checkout_url}, status=status.HTTP_201_CREATED)
+            return Response(
+                {"success": True, "checkout_url": checkout_url},
+                status=status.HTTP_201_CREATED,
+            )
         except Exception:
             transaction.set_rollback(True)
             return Response(
-                {"success": False, "message": "Não foi possível iniciar o checkout da InfinitePay."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                {
+                    "success": False,
+                    "message": "Não foi possível iniciar o checkout da InfinitePay.",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
 
@@ -237,15 +269,30 @@ class PaymentSuccessRedirectView(APIView):
             "⚠️ *Não envia token JWT. O front-end deve exibir uma tela de 'Processando' ao carregar esta rota.*"
         ),
         parameters=[
-            OpenApiParameter(name="order_nsu", type=str, location=OpenApiParameter.QUERY, description="UUID do pedido gerado no nosso sistema"),
-            OpenApiParameter(name="transaction_nsu", type=str, location=OpenApiParameter.QUERY, description="ID único da transação gerado pela InfinitePay"),
-            OpenApiParameter(name="slug", type=str, location=OpenApiParameter.QUERY, description="Código da fatura gerado pela InfinitePay"),
+            OpenApiParameter(
+                name="order_nsu",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                description="UUID do pedido gerado no nosso sistema",
+            ),
+            OpenApiParameter(
+                name="transaction_nsu",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                description="ID único da transação gerado pela InfinitePay",
+            ),
+            OpenApiParameter(
+                name="slug",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                description="Código da fatura gerado pela InfinitePay",
+            ),
         ],
         responses={
             200: OpenApiTypes.OBJECT,
             400: OpenApiTypes.OBJECT,
-            404: OpenApiTypes.OBJECT
-        }
+            404: OpenApiTypes.OBJECT,
+        },
     )
     def get(self, request):
         order_nsu = request.query_params.get("order_nsu")
@@ -253,16 +300,21 @@ class PaymentSuccessRedirectView(APIView):
         slug = request.query_params.get("slug")
 
         if not all([order_nsu, transaction_nsu, slug]):
-            return Response({"message": "Faltam parâmetros de validação."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"message": "Faltam parâmetros de validação."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         try:
             order = CustomerOrder.objects.get(id=order_nsu)
         except CustomerOrder.DoesNotExist:
-            return Response({"message": "Pedido não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"message": "Pedido não encontrado."}, status=status.HTTP_404_NOT_FOUND
+            )
 
         if order.status != OrderStatus.PAID:
             check_data = check_payment_status(order_nsu, transaction_nsu, slug)
-            
+
             if check_data and check_data.get("paid") is True:
                 order.payment.gateway_transaction_id = transaction_nsu
                 order.payment.status = PaymentStatus.PAID
@@ -271,7 +323,13 @@ class PaymentSuccessRedirectView(APIView):
                 order.save()
 
         if order.status == OrderStatus.PAID:
-            return Response({"message": "Pagamento confirmado com sucesso!", "order_id": order_nsu})
-        
-        return Response({"message": "Pagamento pendente ou em processamento.", "order_id": order_nsu})
+            return Response(
+                {"message": "Pagamento confirmado com sucesso!", "order_id": order_nsu}
+            )
 
+        return Response(
+            {
+                "message": "Pagamento pendente ou em processamento.",
+                "order_id": order_nsu,
+            }
+        )
