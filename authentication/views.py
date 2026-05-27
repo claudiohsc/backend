@@ -1,32 +1,31 @@
 import logging
 
 from django.contrib.auth import get_user_model
+from django.db import models
+from django.db.models import Count, Max, Sum
+from django.db.models.functions import Coalesce
+from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import (
     OpenApiExample,
     OpenApiResponse,
     extend_schema,
 )
-from rest_framework import status
+from rest_framework import filters, status, viewsets
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from .permissions import IsStaffOrSuperUser
 from .serializers import (
+    CustomerCRMDetailSerializer,
+    CustomerCRMSerializer,
     GoogleAuthSerializer,
     LogoutInputSerializer,
     TokenRefreshInputSerializer,
     UserSerializer,
 )
 from .services import GoogleAuthService, InvalidGoogleTokenException
-from django.db import models
-from django.db.models import Count, Sum, Max
-from django.db.models.functions import Coalesce
-from rest_framework import viewsets, filters
-from django_filters.rest_framework import DjangoFilterBackend
-from .models import User
-from .permissions import IsStaffOrSuperUser
-from .serializers import CustomerCRMSerializer, CustomerCRMDetailSerializer
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -370,41 +369,50 @@ class MeView(APIView):
         serializer = UserSerializer(request.user)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+
 class CustomerCRMViewSet(viewsets.ReadOnlyModelViewSet):
     """UC07 – Gerenciar Clientes (CRM)"""
+
     permission_classes = [IsStaffOrSuperUser]
-    filter_backends = [DjangoFilterBackend, filters.OrderingFilter, filters.SearchFilter]
-    
-    search_fields = ['name', 'email']
-    ordering_fields = ['created_at', 'total_orders', 'total_spent', 'last_purchase_date']
-    ordering = ['-created_at']
-    
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.OrderingFilter,
+        filters.SearchFilter,
+    ]
+
+    search_fields = ["name", "email"]
+    ordering_fields = [
+        "created_at",
+        "total_orders",
+        "total_spent",
+        "last_purchase_date",
+    ]
+    ordering = ["-created_at"]
+
     filterset_fields = {
-        'created_at': ['gte', 'lte', 'exact'],
+        "created_at": ["gte", "lte", "exact"],
     }
 
     def get_queryset(self):
-        qs = User.objects.filter(profile__role='CUSTOMER').annotate(
-            total_orders=Count('orders'),
+        qs = User.objects.filter(profile__role="CUSTOMER").annotate(
+            total_orders=Count("orders"),
             total_spent=Coalesce(
-                Sum('orders__total_amount'), 
-                0.0, 
-                output_field=models.DecimalField()
+                Sum("orders__total_amount"), 0.0, output_field=models.DecimalField()
             ),
-            last_purchase_date=Max('orders__created_at')
+            last_purchase_date=Max("orders__created_at"),
         )
-        
-        min_freq = self.request.query_params.get('min_frequency')
-        max_freq = self.request.query_params.get('max_frequency')
-        
+
+        min_freq = self.request.query_params.get("min_frequency")
+        max_freq = self.request.query_params.get("max_frequency")
+
         if min_freq is not None:
             qs = qs.filter(total_orders__gte=min_freq)
         if max_freq is not None:
             qs = qs.filter(total_orders__lte=max_freq)
-            
+
         return qs
 
     def get_serializer_class(self):
-        if self.action == 'retrieve':
+        if self.action == "retrieve":
             return CustomerCRMDetailSerializer
         return CustomerCRMSerializer

@@ -15,7 +15,7 @@ class DashboardRecentOrderSerializer(serializers.ModelSerializer):
         model = CustomerOrder
         fields = ["id", "customer_name", "total_amount", "status", "created_at"]
 
-    def get_customer_name(self, obj):
+    def get_customer_name(self, obj) -> str:
         return getattr(obj.user, "name", None) or obj.user.email
 
 

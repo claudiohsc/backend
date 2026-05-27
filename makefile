@@ -1,6 +1,6 @@
 DC_EXEC = docker compose exec backend
 
-.PHONY: install test test-cov show-cov lint format migrate makemigrations run shell check schema-validate ci help
+.PHONY: install test test-cov show-cov lint format migrate makemigrations run shell check schema-validate ci help ci-cov
 
 help:
 	@echo "Targets disponíveis:"
@@ -17,6 +17,7 @@ help:
 	@echo "  check            Roda python manage.py check"
 	@echo "  schema-validate  Valida schema OpenAPI (CI gate)"
 	@echo "  ci               Roda lint + test + schema-validate (gate de PR)"
+	@echo "  ci-cov           Roda lint + test-cov + schema-validate + show-cov (gate de PR com coverage)"
 
 install:
 	$(DC_EXEC) pip install -r requirements.txt
@@ -56,4 +57,6 @@ check:
 schema-validate:
 	$(DC_EXEC) python manage.py spectacular --validate --fail-on-warn --file /tmp/schema.yaml
 
-ci: lint test schema-validate
+ci: lint test schema-validate 
+
+ci-cov: lint test-cov schema-validate

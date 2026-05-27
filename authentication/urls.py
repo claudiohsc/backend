@@ -1,11 +1,18 @@
 from django.urls import path
+from rest_framework.routers import DefaultRouter
 
-from .views import GoogleLoginView, LogoutView, MeView, TokenRefreshView
+from .views import (
+    CustomerCRMViewSet,
+    GoogleLoginView,
+    LogoutView,
+    MeView,
+    TokenRefreshView,
+)
 
 app_name = "authentication"
 
 router = DefaultRouter()
-router.register(r'crm/customers', CustomerCRMViewSet, basename='crm-customers')
+router.register(r"crm/customers", CustomerCRMViewSet, basename="crm-customers")
 
 urlpatterns = [
     # POST - Recebe id_token do Google e retorna JWT + dados do user
@@ -17,3 +24,5 @@ urlpatterns = [
     # GET - Retorna dados do utilizador autenticado
     path("me/", MeView.as_view(), name="me"),
 ]
+
+urlpatterns += router.urls

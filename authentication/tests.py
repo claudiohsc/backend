@@ -220,3 +220,67 @@ class MeViewTests(APITestCase):
         """Deve retornar 401 sem Authorization header."""
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class TokenRefreshViewTests(APITestCase):
+    """Testes para o endpoint POST /api/auth/token/refresh/."""
+
+    url = "/api/auth/token/refresh/"
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="refresh@example.com", name="Refresh User"
+        )
+        self.refresh_token = str(RefreshToken.for_user(self.user))
+
+    def test_renovacao_com_sucesso(self):
+        """Deve gerar um novo access token dado um refresh token válido."""
+        response = self.client.post(
+            self.url, {"refresh": self.refresh_token}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("access", response.json())
+
+    def test_renovacao_sem_token(self):
+        """Deve retornar 400 se o refresh token não for enviado."""
+        response = self.client.post(self.url, {}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_renovacao_com_token_invalido(self):
+        """Deve retornar 401 para um token inválido."""
+        response = self.client.post(self.url, {"refresh": "token-falso"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class LogoutViewTests(APITestCase):
+    """Testes para o endpoint POST /api/auth/logout/."""
+
+    url = "/api/auth/logout/"
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="logout@example.com", name="Logout User"
+        )
+        self.refresh = RefreshToken.for_user(self.user)
+        self.access = str(self.refresh.access_token)
+
+    def test_logout_com_sucesso(self):
+        """Deve invalidar o token e retornar 200."""
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.access}")
+        response = self.client.post(
+            self.url, {"refresh": str(self.refresh)}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_logout_sem_autenticacao_retorna_401(self):
+        """Não deve permitir logout se não enviar Authorization header (access token)."""
+        response = self.client.post(
+            self.url, {"refresh": str(self.refresh)}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_logout_sem_refresh_token_retorna_400(self):
+        """Deve retornar 400 se o corpo do request não tiver o refresh token."""
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.access}")
+        response = self.client.post(self.url, {}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

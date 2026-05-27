@@ -1,7 +1,9 @@
 from rest_framework import permissions
 
+
 class IsStaffOrSuperUser(permissions.BasePermission):
     """Permite acesso apenas a utilizadores administradores (Staff/Superuser)."""
+
     message = "Acesso negado. Apenas administradores podem aceder a este recurso."
 
     def has_permission(self, request, view):

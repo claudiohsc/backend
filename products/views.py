@@ -13,7 +13,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from authentication.permissions import IsStaffOrSuperuser
+from authentication.permissions import IsStaffOrSuperUser
 
 from .models import (
     Category,
@@ -62,7 +62,7 @@ class CategoryListCreateView(APIView):
 
     def get_permissions(self):
         if self.request.method == "POST":
-            return [IsStaffOrSuperuser()]
+            return [IsStaffOrSuperUser()]
         return [AllowAny()]
 
     @extend_schema(
@@ -114,7 +114,7 @@ class CategoryDetailView(APIView):
     def get_permissions(self):
         if self.request.method == "GET":
             return [AllowAny()]
-        return [IsStaffOrSuperuser()]
+        return [IsStaffOrSuperUser()]
 
     def _get_object(self, pk):
         return get_object_or_404(Category, pk=pk)
@@ -185,7 +185,7 @@ class DropCampaignListCreateView(APIView):
 
     def get_permissions(self):
         if self.request.method == "POST":
-            return [IsStaffOrSuperuser()]
+            return [IsStaffOrSuperUser()]
         return [AllowAny()]
 
     @extend_schema(
@@ -256,7 +256,7 @@ class DropCampaignDetailView(APIView):
     def get_permissions(self):
         if self.request.method == "GET":
             return [AllowAny()]
-        return [IsStaffOrSuperuser()]
+        return [IsStaffOrSuperUser()]
 
     def _get_object(self, pk):
         return get_object_or_404(DropCampaign, pk=pk)
@@ -328,7 +328,7 @@ class DropCampaignDetailView(APIView):
 class DropProductManageView(APIView):
     """Associar e desassociar um produto de um drop. Admin only."""
 
-    permission_classes = [IsStaffOrSuperuser]
+    permission_classes = [IsStaffOrSuperUser]
     serializer_class = DropCampaignDetailSerializer
 
     def _get_drop(self, drop_id):
@@ -401,7 +401,7 @@ class ProductListCreateView(APIView):
 
     def get_permissions(self):
         if self.request.method == "POST":
-            return [IsStaffOrSuperuser()]
+            return [IsStaffOrSuperUser()]
         return [AllowAny()]
 
     def get_serializer_class(self):
@@ -496,7 +496,7 @@ class ProductDetailView(APIView):
     def get_permissions(self):
         if self.request.method == "GET":
             return [AllowAny()]
-        return [IsStaffOrSuperuser()]
+        return [IsStaffOrSuperUser()]
 
     def get_serializer_class(self):
         return (
@@ -596,7 +596,7 @@ class ProductDetailView(APIView):
 class ProductVariationCreateView(APIView):
     """Cria variação para um produto. Admin only."""
 
-    permission_classes = [IsStaffOrSuperuser]
+    permission_classes = [IsStaffOrSuperUser]
     serializer_class = ProductVariationSerializer
 
     @extend_schema(
@@ -631,7 +631,7 @@ class ProductVariationCreateView(APIView):
 class ProductVariationDetailView(APIView):
     """Update e delete de variação. Admin only."""
 
-    permission_classes = [IsStaffOrSuperuser]
+    permission_classes = [IsStaffOrSuperUser]
     serializer_class = ProductVariationSerializer
 
     @extend_schema(
@@ -685,7 +685,7 @@ class ProductImageCreateView(APIView):
     """Cria imagem com display_order automático = max+1."""
 
     parser_classes = [MultiPartParser, FormParser]
-    permission_classes = [IsStaffOrSuperuser]
+    permission_classes = [IsStaffOrSuperUser]
     serializer_class = ProductImageSerializer
 
     @extend_schema(
@@ -731,7 +731,7 @@ class ProductImageUpdateView(APIView):
     """Substitui o binário de uma imagem existente. display_order é preservado."""
 
     parser_classes = [MultiPartParser, FormParser]
-    permission_classes = [IsStaffOrSuperuser]
+    permission_classes = [IsStaffOrSuperUser]
     serializer_class = ProductImageSerializer
 
     @extend_schema(
@@ -772,7 +772,7 @@ class ProductImageUpdateView(APIView):
 class ProductImageDeleteView(APIView):
     """Remove uma imagem de produto. Admin only."""
 
-    permission_classes = [IsStaffOrSuperuser]
+    permission_classes = [IsStaffOrSuperUser]
     serializer_class = ProductImageSerializer
 
     @extend_schema(
@@ -799,7 +799,7 @@ class ProductImageDeleteView(APIView):
 class StockMovementListCreateView(APIView):
     """Histórico e registro de movimentações de estoque de uma variação."""
 
-    permission_classes = [IsStaffOrSuperuser]
+    permission_classes = [IsStaffOrSuperUser]
     serializer_class = StockMovementSerializer
 
     def _get_variation(self, variation_id, lock=False):

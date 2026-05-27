@@ -8,7 +8,7 @@ from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from authentication.permissions import IsStaffOrSuperuser
+from authentication.permissions import IsStaffOrSuperUser
 from products.models import ProductVariation
 
 from .models import CustomerOrder, OrderStatus
@@ -36,9 +36,13 @@ class AdminDashboardView(APIView):
                         name="DashboardSalesSummary",
                         fields={
                             "period_days": serializers.IntegerField(),
-                            "total_revenue": serializers.DecimalField(max_digits=10, decimal_places=2),
+                            "total_revenue": serializers.DecimalField(
+                                max_digits=10, decimal_places=2
+                            ),
                             "total_orders": serializers.IntegerField(),
-                            "average_ticket": serializers.DecimalField(max_digits=10, decimal_places=2),
+                            "average_ticket": serializers.DecimalField(
+                                max_digits=10, decimal_places=2
+                            ),
                         },
                     ),
                     "customers_summary": inline_serializer(
