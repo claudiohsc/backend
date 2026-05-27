@@ -1,6 +1,6 @@
-from .base import *
-
 import dj_database_url
+
+from .base import *
 
 ALLOWED_HOSTS = []
 
@@ -13,7 +13,7 @@ CORS_ALLOWED_ORIGINS = []
 
 # SSL Redirect
 
-SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_SSL_REDIRECT = True
 
 # Database

@@ -1,6 +1,6 @@
 DC_EXEC = docker compose exec backend
 
-.PHONY: install test test-cov lint format migrate makemigrations run shell check schema-validate ci help
+.PHONY: install test test-cov show-cov lint format migrate makemigrations run shell check schema-validate ci help
 
 help:
 	@echo "Targets disponíveis:"
@@ -9,6 +9,7 @@ help:
 	@echo "  format           Corrige com ruff --fix e formata com ruff format"
 	@echo "  test             Roda pytest -v com coverage"
 	@echo "  test-cov         Gera relatório HTML de coverage"
+	@echo "  show-cov         Abre o relatório de coverage no navegador"
 	@echo "  migrate          Aplica migrations pendentes"
 	@echo "  makemigrations   Gera migrations para mudanças nos models"
 	@echo "  run              Sobe o servidor de desenvolvimento"
@@ -33,6 +34,9 @@ test:
 
 test-cov:
 	$(DC_EXEC) pytest --cov=. --cov-report=html
+
+show-cov:
+	@python3 -c "import webbrowser, os; webbrowser.open('file://' + os.path.realpath('htmlcov/index.html'))" || python -c "import webbrowser, os; webbrowser.open('file://' + os.path.realpath('htmlcov/index.html'))"
 
 migrate:
 	$(DC_EXEC) python manage.py migrate

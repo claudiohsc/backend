@@ -1,4 +1,6 @@
-from .base import *
+import tempfile
+
+from .base import *  # noqa: F403
 
 DATABASES = {
     "default": {
@@ -6,3 +8,6 @@ DATABASES = {
         "NAME": ":memory:",
     }
 }
+
+# Isolar uploads de teste do mediafiles/ real
+MEDIA_ROOT = tempfile.mkdtemp(prefix="test-media-")
