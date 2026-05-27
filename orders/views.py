@@ -6,13 +6,15 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from drf_spectacular.utils import extend_schema
 
 from authentication.permissions import IsStaffOrSuperuser
 
-from .models import CustomerOrder, OrderStatus
+from .models import CustomerOrder, OrderStatus, Cart, OrderItem, PaymentStatus, Payment
 from .serializers import DashboardLowStockSerializer, DashboardRecentOrderSerializer
 from products.models import ProductVariation
+from .services import create_infinitepay_checkout, check_payment_status
 
 User = get_user_model()
 
@@ -92,3 +94,105 @@ class AdminDashboardView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+class CheckoutAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request):
+        user = request.user
+        cart = Cart.objects.filter(user=user, status='ACTIVE').prefetch_related('items__variation__product').first()
+
+        if not cart or not cart.items.exists():
+            return Response({"success": False, "message": "Carrinho vazio."}, status=status.HTTP_400_BAD_REQUEST)
+
+        address_id = request.data.get('address_id')
+        if not address_id:
+            return Response({"success": False, "message": "Endereço não informado."}, status=status.HTTP_400_BAD_REQUEST)
+
+        address = user.addresses.filter(id=address_id).first()
+        if not address:
+            return Response({"success": False, "message": "Endereço inválido."}, status=status.HTTP_400_BAD_REQUEST)
+
+        subtotal = sum(item.quantity * item.unit_price for item in cart.items.all())
+        shipping_cost = request.data.get('shipping_cost', 0.00)
+        total_amount = float(subtotal) + float(shipping_cost)
+
+        order = CustomerOrder.objects.create(
+            user=user,
+            address=address,
+            subtotal=subtotal,
+            shipping_cost=shipping_cost,
+            total_amount=total_amount,
+            shipping_zip_code=address.zip_code,
+            shipping_street=address.street,
+            shipping_number=address.address_number,
+            shipping_complement=address.complement,
+            shipping_neighborhood=address.neighborhood,
+            shipping_city=address.city,
+            shipping_state=address.state
+        )
+
+        for item in cart.items.all():
+            if item.variation.stock_quantity < item.quantity:
+                transaction.set_rollback(True)
+                return Response(
+                    {"success": False, "message": f"Estoque insuficiente para {item.variation.product.name}."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            item.variation.stock_quantity -= item.quantity
+            item.variation.save()
+
+            OrderItem.objects.create(
+                order=order,
+                variation=item.variation,
+                quantity=item.quantity,
+                unit_price=item.unit_price,
+                product_name=f"{item.variation.product.name} - {item.variation.size}",
+                sku_snapshot=item.variation.sku
+            )
+
+        cart.status = 'FINISHED'
+        cart.save()
+
+        try:
+            checkout_url = create_infinitepay_checkout(order, request)
+            return Response({"success": True, "checkout_url": checkout_url}, status=status.HTTP_201_CREATED)
+        except Exception:
+            transaction.set_rollback(True)
+            return Response(
+                {"success": False, "message": "Não foi possível iniciar o checkout da InfinitePay."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+class PaymentSuccessRedirectView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        order_nsu = request.query_params.get("order_nsu")
+        transaction_nsu = request.query_params.get("transaction_nsu")
+        slug = request.query_params.get("slug")
+
+        if not all([order_nsu, transaction_nsu, slug]):
+            return Response({"message": "Faltam parâmetros de validação."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            order = CustomerOrder.objects.get(id=order_nsu)
+        except CustomerOrder.DoesNotExist:
+            return Response({"message": "Pedido não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+
+        if order.status != OrderStatus.PAID:
+            check_data = check_payment_status(order_nsu, transaction_nsu, slug)
+            
+            if check_data and check_data.get("paid") is True:
+                order.payment.gateway_transaction_id = transaction_nsu
+                order.payment.status = PaymentStatus.PAID
+                order.payment.save()
+                order.status = OrderStatus.PAID
+                order.save()
+
+        if order.status == OrderStatus.PAID:
+            return Response({"message": "Pagamento confirmado com sucesso!", "order_id": order_nsu})
+        
+        return Response({"message": "Pagamento pendente ou em processamento.", "order_id": order_nsu})
