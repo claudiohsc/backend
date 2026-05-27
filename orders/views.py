@@ -3,11 +3,12 @@ import datetime
 from django.contrib.auth import get_user_model
 from django.db.models import Sum
 from django.utils import timezone
+from django.db import transaction
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes, OpenApiExample
 
 from authentication.permissions import IsStaffOrSuperuser
 
@@ -98,6 +99,33 @@ class AdminDashboardView(APIView):
 class CheckoutAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        summary="Finalizar Compra e Gerar Link InfinitePay",
+        description=(
+            "Lê o carrinho ativo do utilizador autenticado e verifica o estoque disponível. "
+            "Gera o pedido (CustomerOrder), faz o snapshot do endereço de entrega e debita o estoque. "
+            "Por fim, comunica-se com a API da InfinitePay para gerar o link de checkout.\n\n"
+            "**Fluxo:**\n"
+            "1. Envie o `address_id` (UUID do endereço do perfil) e o `shipping_cost`.\n"
+            "2. O backend valida os itens e gera a cobrança.\n"
+            "3. O utilizador é redirecionado para a `checkout_url` retornada."
+        ),
+        request={
+            "application/json": {
+                "type": "object",
+                "properties": {
+                    "address_id": {"type": "string", "format": "uuid", "description": "UUID do endereço de entrega salvo no perfil"},
+                    "shipping_cost": {"type": "number", "format": "float", "description": "Valor calculado do frete (em Reais)"}
+                },
+                "required": ["address_id"]
+            }
+        },
+        responses={
+            201: OpenApiTypes.OBJECT,
+            400: OpenApiTypes.OBJECT,
+            500: OpenApiTypes.OBJECT
+        }
+    )
     @transaction.atomic
     def post(self, request):
         user = request.user
@@ -166,9 +194,29 @@ class CheckoutAPIView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+
 class PaymentSuccessRedirectView(APIView):
     permission_classes = [AllowAny]
 
+    @extend_schema(
+        summary="Confirmação de Pagamento (Redirect InfinitePay)",
+        description=(
+            "Rota de fallback acessada pelo navegador do cliente após o pagamento na InfinitePay. "
+            "Recebe os parâmetros via query string, consulta o status real da transação no servidor "
+            "da InfinitePay e efetiva a baixa do pedido (muda status para PAID) caso aprovado.\n\n"
+            "⚠️ *Não envia token JWT. O front-end deve exibir uma tela de 'Processando' ao carregar esta rota.*"
+        ),
+        parameters=[
+            OpenApiParameter(name="order_nsu", type=str, location=OpenApiParameter.QUERY, description="UUID do pedido gerado no nosso sistema"),
+            OpenApiParameter(name="transaction_nsu", type=str, location=OpenApiParameter.QUERY, description="ID único da transação gerado pela InfinitePay"),
+            OpenApiParameter(name="slug", type=str, location=OpenApiParameter.QUERY, description="Código da fatura gerado pela InfinitePay"),
+        ],
+        responses={
+            200: OpenApiTypes.OBJECT,
+            400: OpenApiTypes.OBJECT,
+            404: OpenApiTypes.OBJECT
+        }
+    )
     def get(self, request):
         order_nsu = request.query_params.get("order_nsu")
         transaction_nsu = request.query_params.get("transaction_nsu")
