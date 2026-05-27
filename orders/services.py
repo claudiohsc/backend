@@ -24,7 +24,7 @@ def create_infinitepay_checkout(order, request):
             "description": "Frete"
         })
 
-    redirect_url = request.build_absolute_uri(reverse('payment-success'))
+    redirect_url = request.build_absolute_uri('/api/orders/pagamento-sucesso/')
 
     payload = {
         "handle": settings.INFINITEPAY_HANDLE,
