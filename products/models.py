@@ -1,7 +1,9 @@
 import uuid
+
 from django.conf import settings
 from django.core.validators import FileExtensionValidator, MinValueValidator
 from django.db import models
+
 
 class Category(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -15,6 +17,7 @@ class Category(models.Model):
 
     def __str__(self):
         return self.name
+
 
 class DropCampaign(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -46,10 +49,23 @@ class DropCampaign(models.Model):
             self.banner.delete(save=False)
         return super().delete(*args, **kwargs)
 
+
 class Product(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    drop = models.ForeignKey(DropCampaign, on_delete=models.SET_NULL, null=True, blank=True, related_name='products')
-    category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True, blank=True, related_name='products')
+    drop = models.ForeignKey(
+        DropCampaign,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="products",
+    )
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="products",
+    )
     name = models.CharField(max_length=255)
     description = models.TextField()
     base_price = models.DecimalField(
@@ -62,9 +78,12 @@ class Product(models.Model):
     def __str__(self):
         return self.name
 
+
 class ProductVariation(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='variations')
+    product = models.ForeignKey(
+        Product, on_delete=models.CASCADE, related_name="variations"
+    )
     size = models.CharField(max_length=50)
     sku = models.CharField(max_length=100, unique=True)
     stock_quantity = models.PositiveIntegerField(default=0)
@@ -74,9 +93,12 @@ class ProductVariation(models.Model):
     def __str__(self):
         return f"{self.product.name} - {self.size}"
 
+
 class ProductImage(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="images")
+    product = models.ForeignKey(
+        Product, on_delete=models.CASCADE, related_name="images"
+    )
     image = models.ImageField(
         upload_to="products/images/",
         validators=[

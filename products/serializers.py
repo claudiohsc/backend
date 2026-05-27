@@ -25,7 +25,13 @@ class CategorySerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         if not validated_data.get("slug"):
-            validated_data["slug"] = slugify(validated_data["name"])
+            base = slugify(validated_data["name"])
+            slug = base
+            suffix = 2
+            while Category.objects.filter(slug=slug).exists():
+                slug = f"{base}-{suffix}"
+                suffix += 1
+            validated_data["slug"] = slug
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
@@ -72,9 +78,7 @@ class DropCampaignSerializer(serializers.ModelSerializer):
     def validate_banner(self, value):
         max_mb = 5
         if value and value.size > max_mb * 1024 * 1024:
-            raise serializers.ValidationError(
-                f"Banner não pode passar de {max_mb}MB."
-            )
+            raise serializers.ValidationError(f"Banner não pode passar de {max_mb}MB.")
         return value
 
     def validate(self, attrs):
@@ -88,7 +92,13 @@ class DropCampaignSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         if not validated_data.get("slug"):
-            validated_data["slug"] = slugify(validated_data["name"])
+            base = slugify(validated_data["name"])
+            slug = base
+            suffix = 2
+            while DropCampaign.objects.filter(slug=slug).exists():
+                slug = f"{base}-{suffix}"
+                suffix += 1
+            validated_data["slug"] = slug
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
@@ -148,9 +158,7 @@ class ProductImageSerializer(serializers.ModelSerializer):
     def validate_image(self, value):
         max_mb = 5
         if value and value.size > max_mb * 1024 * 1024:
-            raise serializers.ValidationError(
-                f"Imagem não pode passar de {max_mb}MB."
-            )
+            raise serializers.ValidationError(f"Imagem não pode passar de {max_mb}MB.")
         return value
 
 

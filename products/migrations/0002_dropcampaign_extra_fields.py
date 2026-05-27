@@ -23,42 +23,47 @@ def slugify_existing_drops(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('products', '0001_initial'),
+        ("products", "0001_initial"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='dropcampaign',
-            name='banner',
+            model_name="dropcampaign",
+            name="banner",
             field=models.ImageField(
                 blank=True,
                 null=True,
-                upload_to='drops/banners/',
-                validators=[django.core.validators.FileExtensionValidator(allowed_extensions=['jpg', 'jpeg', 'png', 'webp'])],
-                verbose_name='Banner da campanha',
+                upload_to="drops/banners/",
+                validators=[
+                    django.core.validators.FileExtensionValidator(
+                        allowed_extensions=["jpg", "jpeg", "png", "webp"]
+                    )
+                ],
+                verbose_name="Banner da campanha",
             ),
         ),
         migrations.AddField(
-            model_name='dropcampaign',
-            name='description',
+            model_name="dropcampaign",
+            name="description",
             field=models.TextField(blank=True),
         ),
         migrations.AddField(
-            model_name='dropcampaign',
-            name='is_public',
-            field=models.BooleanField(default=True, verbose_name='Drop público'),
+            model_name="dropcampaign",
+            name="is_public",
+            field=models.BooleanField(default=True, verbose_name="Drop público"),
         ),
         migrations.AddField(
-            model_name='dropcampaign',
-            name='slug',
+            model_name="dropcampaign",
+            name="slug",
             field=models.SlugField(max_length=255, null=True, unique=True),
         ),
-        migrations.RunPython(slugify_existing_drops, reverse_code=migrations.RunPython.noop),
+        migrations.RunPython(
+            slugify_existing_drops, reverse_code=migrations.RunPython.noop
+        ),
         migrations.AlterField(
-            model_name='dropcampaign',
-            name='slug',
+            model_name="dropcampaign",
+            name="slug",
             field=models.SlugField(max_length=255, unique=True),
         ),
     ]

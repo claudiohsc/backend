@@ -1,8 +1,9 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
-from .models import CustomerOrder
 from products.models import ProductVariation
+
+from .models import CustomerOrder
 
 User = get_user_model()
 

@@ -52,9 +52,12 @@ class CategoryAdmin(admin.ModelAdmin):
 @admin.register(DropCampaign)
 class DropCampaignAdmin(admin.ModelAdmin):
     list_display = (
-        "name", "slug",
-        "launch_date", "end_date",
-        "is_public", "is_active",
+        "name",
+        "slug",
+        "launch_date",
+        "end_date",
+        "is_public",
+        "is_active",
     )
     list_filter = ("is_active", "is_public")
     search_fields = ("name", "slug", "description")
@@ -63,10 +66,25 @@ class DropCampaignAdmin(admin.ModelAdmin):
 
 @admin.register(StockMovement)
 class StockMovementAdmin(admin.ModelAdmin):
-    list_display = ("variation", "kind", "reason", "quantity", "created_by", "created_at")
+    list_display = (
+        "variation",
+        "kind",
+        "reason",
+        "quantity",
+        "created_by",
+        "created_at",
+    )
     list_filter = ("kind", "reason", "created_at")
     search_fields = ("variation__sku", "variation__product__name", "note")
-    readonly_fields = ("variation", "kind", "reason", "quantity", "note", "created_by", "created_at")
+    readonly_fields = (
+        "variation",
+        "kind",
+        "reason",
+        "quantity",
+        "note",
+        "created_by",
+        "created_at",
+    )
 
     def has_add_permission(self, request):
         return False

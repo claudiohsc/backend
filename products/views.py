@@ -1,5 +1,4 @@
 import logging
-import uuid
 
 from django.db import transaction
 from django.db.models import Max, Q, Sum
@@ -10,7 +9,7 @@ from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -22,7 +21,6 @@ from .models import (
     Product,
     ProductImage,
     ProductVariation,
-    StockMovement,
     StockMovementKind,
 )
 from .serializers import (
@@ -37,7 +35,6 @@ from .serializers import (
     StockMovementSerializer,
 )
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -45,11 +42,15 @@ def inventory_summary(request):
     products = Product.objects.all()
     data = []
     for product in products:
-        total_stock = product.variations.aggregate(total=Sum("stock_quantity"))["total"] or 0
-        data.append({
-            "name": product.name,
-            "total_stock": total_stock,
-        })
+        total_stock = (
+            product.variations.aggregate(total=Sum("stock_quantity"))["total"] or 0
+        )
+        data.append(
+            {
+                "name": product.name,
+                "total_stock": total_stock,
+            }
+        )
     return JsonResponse({"inventory": data})
 
 
@@ -201,14 +202,16 @@ class DropCampaignListCreateView(APIView):
         queryset = DropCampaign.objects.all().order_by("-created_at")
         if request.query_params.get("active", "").lower() == "true":
             now = timezone.now()
-            queryset = queryset.filter(is_active=True).filter(
-                Q(launch_date__isnull=True) | Q(launch_date__lte=now)
-            ).filter(
-                Q(end_date__isnull=True) | Q(end_date__gte=now)
+            queryset = (
+                queryset.filter(is_active=True)
+                .filter(Q(launch_date__isnull=True) | Q(launch_date__lte=now))
+                .filter(Q(end_date__isnull=True) | Q(end_date__gte=now))
             )
         paginator = PageNumberPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
-        serializer = DropCampaignSerializer(page, many=True, context={"request": request})
+        serializer = DropCampaignSerializer(
+            page, many=True, context={"request": request}
+        )
         return paginator.get_paginated_response(serializer.data)
 
     @extend_schema(
@@ -221,13 +224,17 @@ class DropCampaignListCreateView(APIView):
         request=DropCampaignSerializer,
         responses={
             201: DropCampaignSerializer,
-            400: OpenApiResponse(description="Dados inválidos (ex: datas inconsistentes)."),
+            400: OpenApiResponse(
+                description="Dados inválidos (ex: datas inconsistentes)."
+            ),
             401: OpenApiResponse(description="Não autenticado."),
             403: OpenApiResponse(description="Não autorizado — requer perfil ADMIN."),
         },
     )
     def post(self, request):
-        serializer = DropCampaignSerializer(data=request.data, context={"request": request})
+        serializer = DropCampaignSerializer(
+            data=request.data, context={"request": request}
+        )
         if not serializer.is_valid():
             return Response(
                 {"error": "Dados inválidos.", "details": serializer.errors},
@@ -286,7 +293,9 @@ class DropCampaignDetailView(APIView):
     )
     def put(self, request, pk):
         drop = self._get_object(pk)
-        serializer = DropCampaignSerializer(drop, data=request.data, context={"request": request})
+        serializer = DropCampaignSerializer(
+            drop, data=request.data, context={"request": request}
+        )
         if not serializer.is_valid():
             return Response(
                 {"error": "Dados inválidos.", "details": serializer.errors},
@@ -396,7 +405,11 @@ class ProductListCreateView(APIView):
         return [AllowAny()]
 
     def get_serializer_class(self):
-        return ProductWriteSerializer if self.request.method == "POST" else ProductListSerializer
+        return (
+            ProductWriteSerializer
+            if self.request.method == "POST"
+            else ProductListSerializer
+        )
 
     @extend_schema(
         tags=["Products"],
@@ -415,7 +428,9 @@ class ProductListCreateView(APIView):
             "variations", "images"
         )
 
-        is_admin = request.user.is_authenticated and (request.user.is_staff or request.user.is_superuser)
+        is_admin = request.user.is_authenticated and (
+            request.user.is_staff or request.user.is_superuser
+        )
         is_active_param = request.query_params.get("is_active")
         if is_admin and is_active_param is not None:
             qs = qs.filter(is_active=is_active_param.lower() == "true")
@@ -437,7 +452,9 @@ class ProductListCreateView(APIView):
         qs = qs.order_by("-created_at")
         paginator = PageNumberPagination()
         page = paginator.paginate_queryset(qs, request, view=self)
-        serializer = ProductListSerializer(page, many=True, context={"request": request})
+        serializer = ProductListSerializer(
+            page, many=True, context={"request": request}
+        )
         return paginator.get_paginated_response(serializer.data)
 
     @extend_schema(
@@ -451,7 +468,9 @@ class ProductListCreateView(APIView):
         request=ProductWriteSerializer,
         responses={
             201: ProductDetailSerializer,
-            400: OpenApiResponse(description="Dados inválidos (ex: SKU duplicado, base_price negativo)."),
+            400: OpenApiResponse(
+                description="Dados inválidos (ex: SKU duplicado, base_price negativo)."
+            ),
             401: OpenApiResponse(description="Não autenticado."),
             403: OpenApiResponse(description="Não autorizado — requer perfil ADMIN."),
         },
@@ -480,7 +499,11 @@ class ProductDetailView(APIView):
         return [IsStaffOrSuperuser()]
 
     def get_serializer_class(self):
-        return ProductWriteSerializer if self.request.method == "PUT" else ProductDetailSerializer
+        return (
+            ProductWriteSerializer
+            if self.request.method == "PUT"
+            else ProductDetailSerializer
+        )
 
     def _get_object(self, pk, request, allow_inactive_for_admin=True):
         product = get_object_or_404(
@@ -489,7 +512,9 @@ class ProductDetailView(APIView):
             ),
             pk=pk,
         )
-        is_admin = request.user.is_authenticated and (request.user.is_staff or request.user.is_superuser)
+        is_admin = request.user.is_authenticated and (
+            request.user.is_staff or request.user.is_superuser
+        )
         if not product.is_active and not (is_admin and allow_inactive_for_admin):
             raise Product.DoesNotExist
         return product
@@ -681,7 +706,7 @@ class ProductImageCreateView(APIView):
             404: OpenApiResponse(description="Produto não encontrado."),
         },
     )
-    def put(self, request, product_id):
+    def post(self, request, product_id):
         product = get_object_or_404(Product, pk=product_id)
         serializer = ProductImageSerializer(data=request.data)
         if not serializer.is_valid():
@@ -689,9 +714,13 @@ class ProductImageCreateView(APIView):
                 {"error": "Dados inválidos.", "details": serializer.errors},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        max_order = product.images.aggregate(Max("display_order"))["display_order__max"] or 0
+        max_order = (
+            product.images.aggregate(Max("display_order"))["display_order__max"] or 0
+        )
         image = serializer.save(product=product, display_order=max_order + 1)
-        logger.info(f"Imagem criada para produto {product.id}: ordem {image.display_order}")
+        logger.info(
+            f"Imagem criada para produto {product.id}: ordem {image.display_order}"
+        )
         return Response(
             ProductImageSerializer(image, context={"request": request}).data,
             status=status.HTTP_201_CREATED,
@@ -810,7 +839,9 @@ class StockMovementListCreateView(APIView):
         request=StockMovementSerializer,
         responses={
             201: StockMovementSerializer,
-            400: OpenApiResponse(description="Dados inválidos ou saída supera o estoque."),
+            400: OpenApiResponse(
+                description="Dados inválidos ou saída supera o estoque."
+            ),
             401: OpenApiResponse(description="Não autenticado."),
             403: OpenApiResponse(description="Não autorizado — requer perfil ADMIN."),
             404: OpenApiResponse(description="Variação não encontrada."),

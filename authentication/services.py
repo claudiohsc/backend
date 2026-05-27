@@ -11,7 +11,6 @@ Fluxo completo:
 """
 
 import logging
-from typing import Tuple
 
 from django.conf import settings
 from google.auth.transport import requests as google_requests
@@ -24,11 +23,13 @@ logger = logging.getLogger(__name__)
 
 class GoogleAuthException(Exception):
     """Exceção base para erros de autenticação com Google."""
+
     pass
 
 
 class InvalidGoogleTokenException(GoogleAuthException):
     """Token do Google inválido, expirado ou de cliente incorreto."""
+
     pass
 
 
@@ -82,7 +83,7 @@ class GoogleAuthService:
             raise InvalidGoogleTokenException(f"Erro na verificação: {str(e)}")
 
     @classmethod
-    def authenticate_or_create_user(cls, id_token_str: str) -> Tuple[User, bool]:
+    def authenticate_or_create_user(cls, id_token_str: str) -> tuple[User, bool]:
         """
         Verifica o token do Google e cria ou autentica o utilizador.
 
@@ -103,7 +104,7 @@ class GoogleAuthService:
         # 1. Verifica o token junto ao Google
         google_payload = cls.verify_google_token(id_token_str)
 
-        google_id = google_payload.get("sub")         # ID único do Google
+        google_id = google_payload.get("sub")  # ID único do Google
         email = google_payload.get("email", "").lower()
         name = google_payload.get("name", "")
         avatar_url = google_payload.get("picture", "")
@@ -151,7 +152,15 @@ class GoogleAuthService:
             if not user.name and name:
                 user.name = name
             user.is_new_user = False
-            user.save(update_fields=["google_id", "avatar_url", "name", "is_new_user", "updated_at"])
+            user.save(
+                update_fields=[
+                    "google_id",
+                    "avatar_url",
+                    "name",
+                    "is_new_user",
+                    "updated_at",
+                ]
+            )
 
             logger.info(f"Conta existente vinculada ao Google: {email}")
             return user, False

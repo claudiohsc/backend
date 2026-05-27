@@ -32,7 +32,6 @@ urlpatterns = [
         CategoryDetailView.as_view(),
         name="category-detail",
     ),
-
     # GET (público) - Lista drops / POST (admin) - Cria drop
     path(
         "drops/",
@@ -51,7 +50,6 @@ urlpatterns = [
         DropProductManageView.as_view(),
         name="drop-product-manage",
     ),
-
     # GET (público) - Lista produtos / POST (admin) - Cria produto
     path(
         "products/",
@@ -76,7 +74,7 @@ urlpatterns = [
         ProductVariationDetailView.as_view(),
         name="variation-detail",
     ),
-    # PUT (admin, multipart) - Cria imagem (display_order auto)
+    # POST (admin, multipart) - Cria imagem (display_order auto)
     path(
         "products/<uuid:product_id>/images/",
         ProductImageCreateView.as_view(),
@@ -100,7 +98,6 @@ urlpatterns = [
         StockMovementListCreateView.as_view(),
         name="variation-stock-movements",
     ),
-
     # GET - Resumo de stock (legado)
     path("inventory/", inventory_summary, name="inventory_summary"),
 ]

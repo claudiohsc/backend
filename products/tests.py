@@ -27,8 +27,6 @@ from .models import (
     ProductImage,
     ProductVariation,
     StockMovement,
-    StockMovementKind,
-    StockMovementReason,
 )
 
 User = get_user_model()
@@ -73,7 +71,9 @@ class CategoryListCreateTests(APITestCase):
     url = "/api/catalog/categories/"
 
     def setUp(self):
-        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True)
+        self.admin = make_user(
+            "admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True
+        )
         self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
         Category.objects.create(name="Camisetas", slug="camisetas")
         Category.objects.create(name="Bonés", slug="bones")
@@ -141,7 +141,9 @@ class CategoryDetailTests(APITestCase):
     """Testes para GET/PUT/DELETE /api/catalog/categories/{id}/."""
 
     def setUp(self):
-        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True)
+        self.admin = make_user(
+            "admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True
+        )
         self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
         self.category = Category.objects.create(name="Camisetas", slug="camisetas")
         self.url = f"/api/catalog/categories/{self.category.id}/"
@@ -221,7 +223,9 @@ class DropCampaignListCreateTests(APITestCase):
     url = "/api/catalog/drops/"
 
     def setUp(self):
-        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True)
+        self.admin = make_user(
+            "admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True
+        )
         self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
         now = timezone.now()
         DropCampaign.objects.create(
@@ -385,7 +389,9 @@ class DropCampaignDetailTests(APITestCase):
     """Testes para GET/PUT/DELETE /api/catalog/drops/{id}/."""
 
     def setUp(self):
-        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True)
+        self.admin = make_user(
+            "admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True
+        )
         self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
         self.drop = DropCampaign.objects.create(
             name="Verão 2026", slug="verao-2026", is_active=True
@@ -480,12 +486,18 @@ class DropProductManageTests(APITestCase):
     """Testes para POST/DELETE /api/catalog/drops/{drop_id}/products/{product_id}/."""
 
     def setUp(self):
-        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True)
+        self.admin = make_user(
+            "admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True
+        )
         self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
-        self.drop = DropCampaign.objects.create(name="Verão", slug="verao", is_active=True)
+        self.drop = DropCampaign.objects.create(
+            name="Verão", slug="verao", is_active=True
+        )
         self.outro_drop = DropCampaign.objects.create(name="Outro", slug="outro")
         self.product = Product.objects.create(
-            name="Camiseta", description="x", base_price=100,
+            name="Camiseta",
+            description="x",
+            base_price=100,
         )
         self.url = f"/api/catalog/drops/{self.drop.id}/products/{self.product.id}/"
 
@@ -555,11 +567,17 @@ class ProductListTests(APITestCase):
     url = "/api/catalog/products/"
 
     def setUp(self):
-        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True)
+        self.admin = make_user(
+            "admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True
+        )
         self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
         self.category = Category.objects.create(name="Camisetas", slug="camisetas")
-        self.drop = DropCampaign.objects.create(name="Verão", slug="verao", is_active=True)
-        self.ativo = make_product(name="Camisa Branca", category=self.category, drop=self.drop)
+        self.drop = DropCampaign.objects.create(
+            name="Verão", slug="verao", is_active=True
+        )
+        self.ativo = make_product(
+            name="Camisa Branca", category=self.category, drop=self.drop
+        )
         make_product(name="Camisa Preta", category=self.category)
         self.inativo = make_product(name="Removido", is_active=False)
 
@@ -579,7 +597,9 @@ class ProductListTests(APITestCase):
 
     def test_admin_filtra_is_active_false(self):
         """Admin pode passar ?is_active=false e ver só inativos."""
-        response = self.client.get(f"{self.url}?is_active=false", **auth_header(self.admin))
+        response = self.client.get(
+            f"{self.url}?is_active=false", **auth_header(self.admin)
+        )
         body = response.json()
         self.assertEqual(body["count"], 1)
         self.assertEqual(body["results"][0]["name"], "Removido")
@@ -604,7 +624,9 @@ class ProductListTests(APITestCase):
         results = response.json()["results"]
         ids_returned = [r["id"] for r in results]
         # Última criada (Camisa Preta — feita depois) vem antes da Camisa Branca
-        self.assertEqual(ids_returned[0], str(Product.objects.get(name="Camisa Preta").id))
+        self.assertEqual(
+            ids_returned[0], str(Product.objects.get(name="Camisa Preta").id)
+        )
 
 
 # ─── Product — Detail ─────────────────────────────────────────────────────────
@@ -614,7 +636,9 @@ class ProductDetailTests(APITestCase):
     """Testes para GET /api/catalog/products/{id}/."""
 
     def setUp(self):
-        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True)
+        self.admin = make_user(
+            "admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True
+        )
         self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
         self.product = make_product(name="Camiseta")
         self.inativo = make_product(name="Inativo", is_active=False)
@@ -657,7 +681,9 @@ class ProductCreateTests(APITestCase):
     url = "/api/catalog/products/"
 
     def setUp(self):
-        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True)
+        self.admin = make_user(
+            "admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True
+        )
         self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
 
     def test_admin_cria_produto_simples(self):
@@ -734,7 +760,9 @@ class ProductCreateTests(APITestCase):
 
 class ProductUpdateTests(APITestCase):
     def setUp(self):
-        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True)
+        self.admin = make_user(
+            "admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True
+        )
         self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
         self.product = make_product(name="Old")
         self.url = f"/api/catalog/products/{self.product.id}/"
@@ -761,7 +789,9 @@ class ProductUpdateTests(APITestCase):
 
 class ProductDeleteTests(APITestCase):
     def setUp(self):
-        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True)
+        self.admin = make_user(
+            "admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True
+        )
         self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
         self.product = make_product()
         self.url = f"/api/catalog/products/{self.product.id}/"
@@ -781,7 +811,9 @@ class ProductDeleteTests(APITestCase):
 
 class VariationCRUDTests(APITestCase):
     def setUp(self):
-        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True)
+        self.admin = make_user(
+            "admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True
+        )
         self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
         self.product = make_product()
         self.variation = ProductVariation.objects.create(
@@ -850,13 +882,15 @@ def make_product_image_file(name="img.jpg"):
 
 class ImagePersistTests(APITestCase):
     def setUp(self):
-        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True)
+        self.admin = make_user(
+            "admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True
+        )
         self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
         self.product = make_product()
         self.create_url = f"/api/catalog/products/{self.product.id}/images/"
 
     def test_primeira_imagem_recebe_display_order_1(self):
-        response = self.client.put(
+        response = self.client.post(
             self.create_url,
             {"image": make_product_image_file()},
             format="multipart",
@@ -866,17 +900,25 @@ class ImagePersistTests(APITestCase):
         self.assertEqual(response.json()["display_order"], 1)
 
     def test_segunda_imagem_recebe_display_order_2(self):
-        self.client.put(self.create_url, {"image": make_product_image_file("a.jpg")},
-                        format="multipart", **auth_header(self.admin))
-        response = self.client.put(self.create_url, {"image": make_product_image_file("b.jpg")},
-                                   format="multipart", **auth_header(self.admin))
+        self.client.post(
+            self.create_url,
+            {"image": make_product_image_file("a.jpg")},
+            format="multipart",
+            **auth_header(self.admin),
+        )
+        response = self.client.post(
+            self.create_url,
+            {"image": make_product_image_file("b.jpg")},
+            format="multipart",
+            **auth_header(self.admin),
+        )
         self.assertEqual(response.json()["display_order"], 2)
 
     def test_extensao_invalida_400(self):
         buf = BytesIO()
         Image.new("RGB", (1, 1), color="red").save(buf, format="GIF")
         gif = SimpleUploadedFile("x.gif", buf.getvalue(), content_type="image/gif")
-        response = self.client.put(
+        response = self.client.post(
             self.create_url,
             {"image": gif},
             format="multipart",
@@ -890,7 +932,7 @@ class ImagePersistTests(APITestCase):
         Image.new("RGB", (1, 1), color="red").save(buf, format="JPEG")
         content = buf.getvalue() + b"\x00" * (6 * 1024 * 1024)
         big = SimpleUploadedFile("big.jpg", content, content_type="image/jpeg")
-        response = self.client.put(
+        response = self.client.post(
             self.create_url,
             {"image": big},
             format="multipart",
@@ -899,8 +941,12 @@ class ImagePersistTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_update_substitui_binario_e_mantem_ordem(self):
-        post = self.client.put(self.create_url, {"image": make_product_image_file("antigo.jpg")},
-                               format="multipart", **auth_header(self.admin))
+        post = self.client.post(
+            self.create_url,
+            {"image": make_product_image_file("antigo.jpg")},
+            format="multipart",
+            **auth_header(self.admin),
+        )
         image_id = post.json()["id"]
         old_path = ProductImage.objects.get(pk=image_id).image.path
         self.assertTrue(os.path.exists(old_path))
@@ -917,18 +963,24 @@ class ImagePersistTests(APITestCase):
         self.assertEqual(response.json()["display_order"], 1)
 
     def test_delete_apaga_do_disco(self):
-        post = self.client.put(self.create_url, {"image": make_product_image_file()},
-                               format="multipart", **auth_header(self.admin))
+        post = self.client.post(
+            self.create_url,
+            {"image": make_product_image_file()},
+            format="multipart",
+            **auth_header(self.admin),
+        )
         image_id = post.json()["id"]
         path = ProductImage.objects.get(pk=image_id).image.path
         self.assertTrue(os.path.exists(path))
 
-        response = self.client.delete(f"/api/catalog/images/{image_id}/", **auth_header(self.admin))
+        response = self.client.delete(
+            f"/api/catalog/images/{image_id}/", **auth_header(self.admin)
+        )
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(os.path.exists(path))
 
     def test_customer_nao_pode_subir(self):
-        response = self.client.put(
+        response = self.client.post(
             self.create_url,
             {"image": make_product_image_file()},
             format="multipart",
@@ -942,7 +994,9 @@ class ImagePersistTests(APITestCase):
 
 class StockMovementTests(APITestCase):
     def setUp(self):
-        self.admin = make_user("admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True)
+        self.admin = make_user(
+            "admin@x.com", role=UserRole.ADMIN, name="Admin", is_staff=True
+        )
         self.customer = make_user("c@x.com", role=UserRole.CUSTOMER, name="Cliente")
         self.product = make_product()
         self.variation = ProductVariation.objects.create(
@@ -1004,8 +1058,12 @@ class StockMovementTests(APITestCase):
         self.assertEqual(movement.created_by_id, self.admin.id)
 
     def test_historico_listado_admin(self):
-        self.client.post(self.url, {"kind": "ENTRADA", "reason": "COMPRA", "quantity": 1},
-                         format="json", **auth_header(self.admin))
+        self.client.post(
+            self.url,
+            {"kind": "ENTRADA", "reason": "COMPRA", "quantity": 1},
+            format="json",
+            **auth_header(self.admin),
+        )
         response = self.client.get(self.url, **auth_header(self.admin))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.json()["count"], 1)
