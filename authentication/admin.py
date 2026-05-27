@@ -33,11 +33,24 @@ class UserAdmin(BaseUserAdmin):
     add_form = CustomUserCreationForm
     """Admin customizado para o modelo User com Google OAuth."""
 
-    list_display = ["email", "name", "google_id", "is_new_user", "is_active", "created_at"]
+    list_display = [
+        "email",
+        "name",
+        "google_id",
+        "is_new_user",
+        "is_active",
+        "created_at",
+    ]
     list_filter = ["is_new_user", "is_active", "is_staff", "created_at"]
     search_fields = ["email", "name", "google_id"]
     ordering = ["-created_at"]
-    readonly_fields = ["google_id", "avatar_url", "created_at", "updated_at", "last_login"]
+    readonly_fields = [
+        "google_id",
+        "avatar_url",
+        "created_at",
+        "updated_at",
+        "last_login",
+    ]
 
     fieldsets = (
         (None, {"fields": ("email", "password")}),

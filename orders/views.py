@@ -3,16 +3,16 @@ import datetime
 from django.contrib.auth import get_user_model
 from django.db.models import Sum
 from django.utils import timezone
-from rest_framework import status
+from drf_spectacular.utils import extend_schema, inline_serializer
+from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from drf_spectacular.utils import extend_schema
 
-from authentication.permissions import IsStaffOrSuperUser
+from authentication.permissions import IsStaffOrSuperuser
+from products.models import ProductVariation
 
 from .models import CustomerOrder, OrderStatus
 from .serializers import DashboardLowStockSerializer, DashboardRecentOrderSerializer
-from products.models import ProductVariation
 
 User = get_user_model()
 
@@ -28,7 +28,31 @@ class AdminDashboardView(APIView):
 
     @extend_schema(
         description="Endpoint consolidado para o Dashboard Administrativo (UC05).",
-        responses={200: "Resumo do dashboard administrativo."}
+        responses={
+            200: inline_serializer(
+                name="DashboardSummaryResponse",
+                fields={
+                    "sales_summary": inline_serializer(
+                        name="DashboardSalesSummary",
+                        fields={
+                            "period_days": serializers.IntegerField(),
+                            "total_revenue": serializers.DecimalField(max_digits=10, decimal_places=2),
+                            "total_orders": serializers.IntegerField(),
+                            "average_ticket": serializers.DecimalField(max_digits=10, decimal_places=2),
+                        },
+                    ),
+                    "customers_summary": inline_serializer(
+                        name="DashboardCustomersSummary",
+                        fields={
+                            "total_registered": serializers.IntegerField(),
+                            "new_in_period": serializers.IntegerField(),
+                        },
+                    ),
+                    "recent_orders": DashboardRecentOrderSerializer(many=True),
+                    "low_stock_alerts": DashboardLowStockSerializer(many=True),
+                },
+            )
+        },
     )
     def get(self, request):
         thirty_days_ago = timezone.now() - datetime.timedelta(days=30)
@@ -44,11 +68,13 @@ class AdminDashboardView(APIView):
             created_at__gte=thirty_days_ago,
             status__in=active_statuses,
         )
-        total_revenue = valid_orders_period.aggregate(
-            total=Sum("total_amount")
-        )["total"] or 0
+        total_revenue = (
+            valid_orders_period.aggregate(total=Sum("total_amount"))["total"] or 0
+        )
         total_orders = valid_orders_period.count()
-        average_ticket = round(total_revenue / total_orders, 2) if total_orders > 0 else 0
+        average_ticket = (
+            round(total_revenue / total_orders, 2) if total_orders > 0 else 0
+        )
 
         customer_filter = {"is_staff": False, "is_superuser": False}
         total_clientes = User.objects.filter(**customer_filter).count()

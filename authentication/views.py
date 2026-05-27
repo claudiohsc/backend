@@ -5,13 +5,6 @@ from drf_spectacular.utils import (
     OpenApiExample,
     OpenApiResponse,
     extend_schema,
-    extend_schema_view,
-)
-from .serializers import (
-    GoogleAuthSerializer,
-    LogoutInputSerializer,
-    TokenRefreshInputSerializer,
-    UserSerializer,
 )
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -19,7 +12,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .serializers import GoogleAuthSerializer, UserSerializer
+from .serializers import (
+    GoogleAuthSerializer,
+    LogoutInputSerializer,
+    TokenRefreshInputSerializer,
+    UserSerializer,
+)
 from .services import GoogleAuthService, InvalidGoogleTokenException
 from django.db import models
 from django.db.models import Count, Sum, Max
@@ -41,6 +39,7 @@ def get_tokens_for_user(user) -> dict:
         "refresh": str(refresh),
         "access": str(refresh.access_token),
     }
+
 
 _AUTH_SUCCESS_EXAMPLE_NEW = OpenApiExample(
     name="Novo utilizador (201)",
@@ -87,6 +86,7 @@ _AUTH_SUCCESS_EXAMPLE_EXISTING = OpenApiExample(
 
 # ─── Views ────────────────────────────────────────────────────────────────────
 
+
 class GoogleLoginView(APIView):
     """Login com Google OAuth 2.0."""
 
@@ -123,7 +123,10 @@ class GoogleLoginView(APIView):
                 examples=[
                     OpenApiExample(
                         name="Token em falta",
-                        value={"error": "id_token é obrigatório.", "details": {"id_token": ["This field is required."]}},
+                        value={
+                            "error": "id_token é obrigatório.",
+                            "details": {"id_token": ["This field is required."]},
+                        },
                         response_only=True,
                         status_codes=["400"],
                     )
@@ -134,7 +137,10 @@ class GoogleLoginView(APIView):
                 examples=[
                     OpenApiExample(
                         name="Token inválido",
-                        value={"error": "Token Google inválido ou expirado.", "details": "Token invalid: ..."},
+                        value={
+                            "error": "Token Google inválido ou expirado.",
+                            "details": "Token invalid: ...",
+                        },
                         response_only=True,
                         status_codes=["401"],
                     )
@@ -163,7 +169,9 @@ class GoogleLoginView(APIView):
         id_token_str = serializer.validated_data["id_token"]
 
         try:
-            user, is_new_user = GoogleAuthService.authenticate_or_create_user(id_token_str)
+            user, is_new_user = GoogleAuthService.authenticate_or_create_user(
+                id_token_str
+            )
         except InvalidGoogleTokenException as e:
             logger.warning(f"Tentativa de login com token inválido: {e}")
             return Response(
@@ -277,8 +285,12 @@ class LogoutView(APIView):
                     )
                 ],
             ),
-            400: OpenApiResponse(description="Campo `refresh` em falta ou token já expirado"),
-            401: OpenApiResponse(description="Não autenticado — access token inválido ou em falta"),
+            400: OpenApiResponse(
+                description="Campo `refresh` em falta ou token já expirado"
+            ),
+            401: OpenApiResponse(
+                description="Não autenticado — access token inválido ou em falta"
+            ),
         },
         examples=[
             OpenApiExample(
@@ -349,7 +361,9 @@ class MeView(APIView):
                     )
                 ],
             ),
-            401: OpenApiResponse(description="Não autenticado — access token inválido ou em falta"),
+            401: OpenApiResponse(
+                description="Não autenticado — access token inválido ou em falta"
+            ),
         },
     )
     def get(self, request):
