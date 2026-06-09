@@ -5,6 +5,7 @@ from .views import (
     AdminOrderDetailView,
     AdminOrderListView,
     CheckoutAPIView,
+    OrderDispatchView,
     OrderTrackingView,
     PaymentSuccessRedirectView,
 )
@@ -29,5 +30,10 @@ urlpatterns = [
         "<uuid:order_id>/tracking/",
         OrderTrackingView.as_view(),
         name="order-tracking",
+    ),
+    path(
+        "<uuid:order_id>/despachar/",
+        OrderDispatchView.as_view(),
+        name="order-dispatch",
     ),
 ]

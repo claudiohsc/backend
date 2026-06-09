@@ -658,3 +658,94 @@ class AdminOrderManagementTests(APITestCase):
         self.payment.refresh_from_db()
         self.assertEqual(self.order.status, OrderStatus.CANCELED)
         self.assertEqual(self.payment.status, PaymentStatus.FAILED)
+
+
+class OrderDispatchViewTests(APITestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            email="dispatch_admin@shio.com", name="Admin Dispatch", is_staff=True
+        )
+        self.customer = User.objects.create_user(
+            email="dispatch_cliente@shio.com", name="Cliente Dispatch", password="senha_forte_123"
+        )
+        self.order = CustomerOrder.objects.create(
+            user=self.customer,
+            subtotal=100.00,
+            total_amount=115.00,
+            shipping_cost=15.00,
+            status=OrderStatus.PAID,
+            tracking_code=None,
+            shipping_zip_code="71000000",
+            shipping_street="Rua Teste",
+            shipping_number="10",
+            shipping_neighborhood="Centro",
+            shipping_city="Brasília",
+            shipping_state="DF",
+        )
+
+    def dispatch_url(self, order_id):
+        return f"/api/orders/{order_id}/despachar/"
+
+    @patch("orders.views.dispatch_order_and_get_tracking_code")
+    def test_admin_despacha_pedido_e_recebe_tracking_code(self, mock_dispatch):
+        """Admin deve conseguir despachar o pedido e receber o código de rastreio gerado."""
+        mock_dispatch.return_value = "BR123456789BR"
+
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.post(self.dispatch_url(self.order.id))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.json()["tracking_code"], "BR123456789BR")
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.tracking_code, "BR123456789BR")
+        self.assertEqual(self.order.status, OrderStatus.SHIPPED)
+
+    def test_cliente_nao_pode_despachar_pedido(self):
+        """Cliente não deve ter permissão para despachar pedidos."""
+        self.client.force_authenticate(user=self.customer)
+        response = self.client.post(self.dispatch_url(self.order.id))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_pedido_inexistente_retorna_404(self):
+        """UUID que não existe deve retornar 404."""
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.post(self.dispatch_url(uuid.uuid4()))
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_pedido_already_shipped_retorna_400(self):
+        """Pedido já em SHIPPED não deve ser despachado novamente."""
+        self.order.status = OrderStatus.SHIPPED
+        self.order.tracking_code = "BR000000000BR"
+        self.order.save()
+
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.post(self.dispatch_url(self.order.id))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_pedido_delivered_retorna_400(self):
+        """Pedido já entregue não deve ser despachado."""
+        self.order.status = OrderStatus.DELIVERED
+        self.order.save()
+
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.post(self.dispatch_url(self.order.id))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_pedido_cancelado_retorna_400(self):
+        """Pedido cancelado não deve ser despachado."""
+        self.order.status = OrderStatus.CANCELED
+        self.order.save()
+
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.post(self.dispatch_url(self.order.id))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @patch("orders.views.dispatch_order_and_get_tracking_code")
+    def test_falha_na_api_dos_correios_retorna_503(self, mock_dispatch):
+        """Qualquer falha na chamada à API dos Correios deve retornar 503."""
+        mock_dispatch.side_effect = Exception("Timeout nos Correios")
+
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.post(self.dispatch_url(self.order.id))
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
