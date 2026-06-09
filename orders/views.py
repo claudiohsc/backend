@@ -18,8 +18,20 @@ from rest_framework.views import APIView
 from authentication.permissions import IsStaffOrSuperUser
 from products.models import ProductVariation
 
-from .models import Cart, CustomerOrder, OrderItem, OrderStatus, PaymentStatus
-from .serializers import DashboardLowStockSerializer, DashboardRecentOrderSerializer
+from .models import (
+    Cart,
+    CustomerOrder,
+    OrderItem,
+    OrderStatus,
+    OrderStatusLog,
+    PaymentStatus,
+)
+from .serializers import (
+    DashboardLowStockSerializer,
+    DashboardRecentOrderSerializer,
+    OrderDetailSerializer,
+    OrderStatusUpdateSerializer,
+)
 from .services import check_payment_status, create_infinitepay_checkout
 
 User = get_user_model()
@@ -126,6 +138,126 @@ class AdminDashboardView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class AdminOrderListView(APIView):
+    """
+    GET /api/orders/admin/
+    Lista pedidos para o painel admin com filtro por `status`.
+    """
+
+    permission_classes = [IsStaffOrSuperUser]
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name="status",
+                type=OpenApiTypes.STR,
+                description="Filtra pedidos pelo status (ex: PAID, SHIPPED)",
+                location=OpenApiParameter.QUERY,
+            ),
+        ],
+        responses={200: DashboardRecentOrderSerializer(many=True)},
+    )
+    def get(self, request):
+        status_q = request.query_params.get("status")
+        qs = CustomerOrder.objects.select_related("user").order_by("-created_at")
+        if status_q:
+            qs = qs.filter(status=status_q)
+
+        data = DashboardRecentOrderSerializer(qs, many=True).data
+        return Response(data, status=status.HTTP_200_OK)
+
+
+class AdminOrderDetailView(APIView):
+    """
+    GET / PATCH /api/orders/admin/{order_id}/
+    Recupera detalhes do pedido e permite atualização de status/tracking.
+    """
+
+    permission_classes = [IsStaffOrSuperUser]
+
+    @extend_schema(
+        responses={200: OrderDetailSerializer},
+    )
+    def get(self, request, order_id):
+        try:
+            order = (
+                CustomerOrder.objects.select_related("user", "address", "payment")
+                .prefetch_related("items__variation__product")
+                .get(id=order_id)
+            )
+        except CustomerOrder.DoesNotExist:
+            return Response({"message": "Pedido não encontrado."}, status=404)
+
+        return Response(OrderDetailSerializer(order).data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        request=OrderStatusUpdateSerializer,
+        responses={
+            200: OrderDetailSerializer,
+            400: OpenApiTypes.OBJECT,
+            404: OpenApiTypes.OBJECT,
+        },
+    )
+    def patch(self, request, order_id):
+        try:
+            order = CustomerOrder.objects.select_related("payment").get(id=order_id)
+        except CustomerOrder.DoesNotExist:
+            return Response({"message": "Pedido não encontrado."}, status=404)
+
+        serializer = OrderStatusUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        status_value = serializer.validated_data.get("status")
+        tracking_code = serializer.validated_data.get("tracking_code")
+        comment = serializer.validated_data.get("comment")
+
+        # Rules: cannot cancel if payment already PAID
+        if status_value == OrderStatus.CANCELED:
+            if (
+                hasattr(order, "payment")
+                and order.payment
+                and order.payment.status == PaymentStatus.PAID
+            ):
+                return Response(
+                    {
+                        "message": "Não é possível cancelar um pedido com pagamento confirmado."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        # If shipping, require tracking code
+        if status_value == OrderStatus.SHIPPED and not tracking_code:
+            return Response(
+                {"message": "Tracking code obrigatório ao enviar pedido."}, status=400
+            )
+
+        previous_status = order.status
+        order.status = status_value
+        if tracking_code:
+            order.tracking_code = tracking_code
+
+        order.save()
+
+        if (
+            status_value == OrderStatus.CANCELED
+            and hasattr(order, "payment")
+            and order.payment
+        ):
+            if order.payment.status != PaymentStatus.PAID:
+                order.payment.status = PaymentStatus.FAILED
+                order.payment.save()
+
+        OrderStatusLog.objects.create(
+            order=order,
+            changed_by=request.user,
+            previous_status=previous_status,
+            new_status=status_value,
+            tracking_code=tracking_code,
+            comment=comment,
+        )
+
+        return Response(OrderDetailSerializer(order).data, status=status.HTTP_200_OK)
 
 
 class CheckoutAPIView(APIView):

@@ -134,3 +134,29 @@ class Payment(models.Model):
     qrcode_pix = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class OrderStatusLog(models.Model):
+    order = models.ForeignKey(
+        CustomerOrder,
+        on_delete=models.CASCADE,
+        related_name="status_logs",
+    )
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="order_status_changes",
+    )
+    previous_status = models.CharField(max_length=50, choices=OrderStatus.choices)
+    new_status = models.CharField(max_length=50, choices=OrderStatus.choices)
+    tracking_code = models.CharField(max_length=100, null=True, blank=True)
+    comment = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"OrderStatusLog(order={self.order_id}, from={self.previous_status}, to={self.new_status})"

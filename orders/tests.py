@@ -11,6 +11,7 @@ from orders.models import (
     Cart,
     CartItem,
     CustomerOrder,
+    OrderItem,
     OrderStatus,
     Payment,
     PaymentStatus,
@@ -239,3 +240,174 @@ class AdminDashboardViewTests(APITestCase):
         """Utilizador sem permissão is_staff recebe 403."""
         response = self.client.get(self.url, **self.auth_header(self.customer))
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class AdminOrderManagementTests(APITestCase):
+    def setUp(self):
+        # admin
+        self.admin = User.objects.create_user(
+            email="admin2@x.com", name="Admin2", is_staff=True
+        )
+        # customer
+        self.user = User.objects.create_user(email="cliente@x.com", name="Cliente")
+
+        # product/variation
+        self.cat = Category.objects.create(name="Roupas2", slug="roupas2")
+        self.prod = Product.objects.create(
+            category=self.cat, name="Camiseta", base_price=50.00
+        )
+        self.variation = ProductVariation.objects.create(
+            product=self.prod, size="M", sku="CAM-M", stock_quantity=5
+        )
+
+        # order with non-paid payment
+        self.order = CustomerOrder.objects.create(
+            user=self.user,
+            subtotal=100.00,
+            total_amount=100.00,
+            status=OrderStatus.AWAITING_PAYMENT,
+            shipping_zip_code="000",
+            shipping_street="X",
+            shipping_number="1",
+            shipping_neighborhood="Y",
+            shipping_city="Z",
+            shipping_state="DF",
+        )
+        OrderItem.objects.create(
+            order=self.order,
+            variation=self.variation,
+            quantity=2,
+            unit_price=50.00,
+            product_name="Camiseta M",
+        )
+        self.payment = Payment.objects.create(
+            order=self.order,
+            method="CREDIT_CARD",
+            status=PaymentStatus.PROCESSING,
+            total_amount=100.00,
+        )
+
+        # paid order
+        self.paid_order = CustomerOrder.objects.create(
+            user=self.user,
+            subtotal=50.00,
+            total_amount=50.00,
+            status=OrderStatus.PAID,
+            shipping_zip_code="111",
+            shipping_street="Y",
+            shipping_number="2",
+            shipping_neighborhood="B",
+            shipping_city="C",
+            shipping_state="DF",
+        )
+        OrderItem.objects.create(
+            order=self.paid_order,
+            variation=self.variation,
+            quantity=1,
+            unit_price=50.00,
+            product_name="Camiseta M",
+        )
+        Payment.objects.create(
+            order=self.paid_order,
+            method="PIX",
+            status=PaymentStatus.PAID,
+            total_amount=50.00,
+        )
+
+        self.admin_auth = {
+            "HTTP_AUTHORIZATION": f"Bearer {str(RefreshToken.for_user(self.admin).access_token)}"
+        }
+        self.user_auth = {
+            "HTTP_AUTHORIZATION": f"Bearer {str(RefreshToken.for_user(self.user).access_token)}"
+        }
+
+    def test_admin_list_filter_by_status(self):
+        url = "/api/orders/admin/?status=PAID"
+        response = self.client.get(url, **self.admin_auth)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        # only paid_order should be present
+        ids = [o["id"] for o in data]
+        self.assertIn(str(self.paid_order.id), ids)
+        self.assertNotIn(str(self.order.id), ids)
+
+    def test_non_admin_forbidden(self):
+        url = "/api/orders/admin/"
+        response = self.client.get(url, **self.user_auth)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_admin_get_order_detail(self):
+        url = f"/api/orders/admin/{self.order.id}/"
+        response = self.client.get(url, **self.admin_auth)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(data["id"], str(self.order.id))
+        self.assertIn("items", data)
+        self.assertIn("payment", data)
+        self.assertIn("status_logs", data)
+
+    def test_admin_update_status_to_preparing(self):
+        url = f"/api/orders/admin/{self.order.id}/"
+        payload = {"status": "PREPARING"}
+        response = self.client.patch(url, payload, format="json", **self.admin_auth)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, OrderStatus.PREPARING)
+
+    def test_admin_update_status_creates_audit_log(self):
+        url = f"/api/orders/admin/{self.order.id}/"
+        payload = {"status": "PREPARING", "comment": "Iniciando separação"}
+        response = self.client.patch(url, payload, format="json", **self.admin_auth)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response = self.client.get(url, **self.admin_auth)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+
+        self.assertEqual(len(data["status_logs"]), 1)
+        log = data["status_logs"][0]
+        self.assertEqual(log["previous_status"], OrderStatus.AWAITING_PAYMENT)
+        self.assertEqual(log["new_status"], OrderStatus.PREPARING)
+        self.assertEqual(log["comment"], "Iniciando separação")
+        self.assertEqual(log["changed_by"]["email"], self.admin.email)
+
+    def test_admin_ship_stores_tracking_audit_log(self):
+        url = f"/api/orders/admin/{self.order.id}/"
+        payload = {
+            "status": "SHIPPED",
+            "tracking_code": "TRACK123",
+            "comment": "Envio para correios",
+        }
+        response = self.client.patch(url, payload, format="json", **self.admin_auth)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, OrderStatus.SHIPPED)
+        self.assertEqual(self.order.tracking_code, "TRACK123")
+
+        response = self.client.get(url, **self.admin_auth)
+        log = response.json()["status_logs"][0]
+        self.assertEqual(log["tracking_code"], "TRACK123")
+        self.assertEqual(log["comment"], "Envio para correios")
+
+    def test_admin_ship_requires_tracking_code(self):
+        url = f"/api/orders/admin/{self.order.id}/"
+        payload = {"status": "SHIPPED"}
+        response = self.client.patch(url, payload, format="json", **self.admin_auth)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        payload = {"status": "SHIPPED", "tracking_code": "TRACK123"}
+        response = self.client.patch(url, payload, format="json", **self.admin_auth)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, OrderStatus.SHIPPED)
+        self.assertEqual(self.order.tracking_code, "TRACK123")
+
+    def test_admin_cancel_order_payment_not_confirmed(self):
+        url = f"/api/orders/admin/{self.order.id}/"
+        payload = {"status": "CANCELED"}
+        response = self.client.patch(url, payload, format="json", **self.admin_auth)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.order.refresh_from_db()
+        self.payment.refresh_from_db()
+        self.assertEqual(self.order.status, OrderStatus.CANCELED)
+        self.assertEqual(self.payment.status, PaymentStatus.FAILED)
