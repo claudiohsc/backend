@@ -208,6 +208,253 @@ class PaymentSuccessRedirectTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
 
+class OrderTrackingViewTests(APITestCase):
+    def setUp(self):
+        self.customer = User.objects.create_user(
+            email="cliente@shio.com", name="Cliente", password="senha_forte_123"
+        )
+        self.other_customer = User.objects.create_user(
+            email="outro@shio.com", name="Outro Cliente", password="senha_forte_123"
+        )
+        self.admin = User.objects.create_user(
+            email="admin@shio.com", name="Admin", is_staff=True
+        )
+
+        self.order_with_tracking = CustomerOrder.objects.create(
+            user=self.customer,
+            subtotal=100.00,
+            total_amount=115.00,
+            shipping_cost=15.00,
+            status=OrderStatus.SHIPPED,
+            tracking_code="BR123456789BR",
+            shipping_zip_code="71000000",
+            shipping_street="Rua Teste",
+            shipping_number="10",
+            shipping_neighborhood="Centro",
+            shipping_city="Brasília",
+            shipping_state="DF",
+        )
+
+        self.order_without_tracking = CustomerOrder.objects.create(
+            user=self.customer,
+            subtotal=100.00,
+            total_amount=115.00,
+            shipping_cost=15.00,
+            status=OrderStatus.PREPARING,
+            tracking_code=None,
+            shipping_zip_code="71000000",
+            shipping_street="Rua Teste",
+            shipping_number="10",
+            shipping_neighborhood="Centro",
+            shipping_city="Brasília",
+            shipping_state="DF",
+        )
+
+    def tracking_url(self, order_id):
+        return f"/api/orders/{order_id}/tracking/"
+
+    @patch("orders.views.get_order_tracking_data")
+    def test_cliente_consulta_rastreio_do_proprio_pedido_com_sucesso(self, mock_get_tracking):
+        """Cliente autenticado deve receber o histórico de rastreio do seu pedido."""
+        mock_get_tracking.return_value = {
+            "tracking_code": "BR123456789BR",
+            "status_atual": "Objeto em trânsito",
+            "previsao_entrega": "2024-06-10T18:00:00",
+            "eventos": [
+                {"data": "2024-06-08T10:00:00", "descricao": "Objeto postado", "detalhe": "", "local": "BRASILIA - DF"}
+            ],
+        }
+
+        self.client.force_authenticate(user=self.customer)
+        response = self.client.get(self.tracking_url(self.order_with_tracking.id))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.json()["tracking_code"], "BR123456789BR")
+        mock_get_tracking.assert_called_once_with("BR123456789BR")
+
+    @patch("orders.views.get_order_tracking_data")
+    def test_pedido_sem_codigo_de_rastreio_retorna_status_not_shipped(self, mock_get_tracking):
+        """Pedido ainda não despachado deve retornar status not_shipped sem erro."""
+        mock_get_tracking.return_value = {
+            "tracking_code": None,
+            "status": "not_shipped",
+            "eventos": [],
+        }
+
+        self.client.force_authenticate(user=self.customer)
+        response = self.client.get(self.tracking_url(self.order_without_tracking.id))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.json()["status"], "not_shipped")
+
+    def test_cliente_nao_pode_consultar_rastreio_de_pedido_de_outro_cliente(self):
+        """Cliente não deve conseguir acessar pedidos que não são seus."""
+        self.client.force_authenticate(user=self.other_customer)
+        response = self.client.get(self.tracking_url(self.order_with_tracking.id))
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    @patch("orders.views.get_order_tracking_data")
+    def test_admin_pode_consultar_rastreio_de_qualquer_pedido(self, mock_get_tracking):
+        """Admin deve conseguir consultar o rastreio de qualquer pedido."""
+        mock_get_tracking.return_value = {
+            "tracking_code": "BR123456789BR",
+            "status_atual": "Objeto entregue ao destinatário",
+            "previsao_entrega": None,
+            "eventos": [],
+        }
+
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.get(self.tracking_url(self.order_with_tracking.id))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_usuario_nao_autenticado_recebe_401(self):
+        """Requisição sem token JWT deve ser rejeitada."""
+        response = self.client.get(self.tracking_url(self.order_with_tracking.id))
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_pedido_inexistente_retorna_404(self):
+        """UUID que não existe no banco deve retornar 404."""
+        self.client.force_authenticate(user=self.customer)
+        response = self.client.get(self.tracking_url(uuid.uuid4()))
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    @patch("orders.views.get_order_tracking_data")
+    def test_falha_na_api_dos_correios_retorna_503(self, mock_get_tracking):
+        """Qualquer falha na integração com os Correios deve retornar 503."""
+        mock_get_tracking.side_effect = Exception("Timeout conectando aos Correios")
+
+        self.client.force_authenticate(user=self.customer)
+        response = self.client.get(self.tracking_url(self.order_with_tracking.id))
+
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+
+
+class OrderTrackingCodeAssignmentTests(APITestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            email="admin@shio.com", name="Admin", is_staff=True
+        )
+        self.customer = User.objects.create_user(
+            email="cliente@shio.com", name="Cliente", password="senha_forte_123"
+        )
+        self.order = CustomerOrder.objects.create(
+            user=self.customer,
+            subtotal=100.00,
+            total_amount=115.00,
+            shipping_cost=15.00,
+            status=OrderStatus.PAID,
+            tracking_code=None,
+            shipping_zip_code="71000000",
+            shipping_street="Rua Teste",
+            shipping_number="10",
+            shipping_neighborhood="Centro",
+            shipping_city="Brasília",
+            shipping_state="DF",
+        )
+
+    def tracking_url(self, order_id):
+        return f"/api/orders/{order_id}/tracking/"
+
+    def test_admin_registra_codigo_de_rastreio_e_status_muda_para_shipped(self):
+        """Admin deve conseguir vincular o código e o status deve mudar para SHIPPED."""
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.patch(
+            self.tracking_url(self.order.id),
+            {"tracking_code": "BR123456789BR"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.json()["tracking_code"], "BR123456789BR")
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.tracking_code, "BR123456789BR")
+        self.assertEqual(self.order.status, OrderStatus.SHIPPED)
+
+    def test_admin_pode_corrigir_codigo_de_rastreio_ja_existente(self):
+        """Admin deve conseguir sobrescrever um código de rastreio incorreto."""
+        self.order.tracking_code = "BR000000000BR"
+        self.order.status = OrderStatus.SHIPPED
+        self.order.save()
+
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.patch(
+            self.tracking_url(self.order.id),
+            {"tracking_code": "BR123456789BR"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.tracking_code, "BR123456789BR")
+
+    def test_cliente_nao_pode_registrar_codigo_de_rastreio(self):
+        """Cliente não deve ter permissão para registrar código de rastreio."""
+        self.client.force_authenticate(user=self.customer)
+
+        response = self.client.patch(
+            self.tracking_url(self.order.id),
+            {"tracking_code": "BR123456789BR"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_tracking_code_vazio_retorna_400(self):
+        """Enviar tracking_code em branco deve ser rejeitado."""
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.patch(
+            self.tracking_url(self.order.id),
+            {"tracking_code": ""},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_nao_pode_registrar_rastreio_em_pedido_cancelado(self):
+        """Pedido cancelado não deve aceitar código de rastreio."""
+        self.order.status = OrderStatus.CANCELED
+        self.order.save()
+
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.patch(
+            self.tracking_url(self.order.id),
+            {"tracking_code": "BR123456789BR"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_nao_pode_registrar_rastreio_em_pedido_entregue(self):
+        """Pedido já entregue não deve aceitar código de rastreio."""
+        self.order.status = OrderStatus.DELIVERED
+        self.order.save()
+
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.patch(
+            self.tracking_url(self.order.id),
+            {"tracking_code": "BR123456789BR"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_pedido_inexistente_retorna_404(self):
+        """UUID inválido deve retornar 404."""
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.patch(
+            self.tracking_url(uuid.uuid4()),
+            {"tracking_code": "BR123456789BR"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+
 class AdminDashboardViewTests(APITestCase):
     """Testes para o endpoint GET /api/orders/dashboard/summary/."""
 
