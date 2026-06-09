@@ -1,4 +1,5 @@
 import datetime
+import logging
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
@@ -18,6 +19,11 @@ from rest_framework.views import APIView
 from authentication.permissions import IsStaffOrSuperUser
 from products.models import ProductVariation
 
+from .correios import (
+    CorreiosAuthenticationError,
+    CorreiosTrackingUnavailableError,
+    get_order_tracking_data,
+)
 from .models import (
     Cart,
     CustomerOrder,
@@ -35,6 +41,7 @@ from .serializers import (
 from .services import check_payment_status, create_infinitepay_checkout
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 
 class AdminDashboardView(APIView):
@@ -465,3 +472,112 @@ class PaymentSuccessRedirectView(APIView):
                 "order_id": order_nsu,
             }
         )
+
+
+class OrderTrackingView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        summary="Rastreio do Pedido via Correios",
+        description=(
+            "Consulta o histórico de rastreamento de um pedido via API dos Correios.\n\n"
+            "- **Cliente autenticado**: pode consultar apenas os seus próprios pedidos.\n"
+            "- **Admin**: pode consultar qualquer pedido.\n\n"
+            "Retorna `status: not_shipped` se o pedido ainda não possui código de rastreio."
+        ),
+        responses={
+            200: OpenApiTypes.OBJECT,
+            403: OpenApiTypes.OBJECT,
+            404: OpenApiTypes.OBJECT,
+            503: OpenApiTypes.OBJECT,
+        },
+    )
+    def get(self, request, order_id):
+        order = self.get_order_if_user_has_permission(request.user, order_id)
+        if order is None:
+            return Response(
+                {"message": "Pedido não encontrado."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            tracking_data = get_order_tracking_data(order.tracking_code)
+            return Response(tracking_data, status=status.HTTP_200_OK)
+        except (CorreiosAuthenticationError, CorreiosTrackingUnavailableError, Exception):
+            logger.exception("Falha ao consultar rastreio dos Correios para o pedido %s", order_id)
+            return Response(
+                {"message": "Serviço de rastreio temporariamente indisponível."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+    @extend_schema(
+        summary="Registrar Código de Rastreio (Admin)",
+        description=(
+            "Vincula um código de rastreio dos Correios a um pedido e atualiza o status para `SHIPPED`.\n\n"
+            "Restrito a administradores."
+        ),
+        request={
+            "application/json": {
+                "type": "object",
+                "required": ["tracking_code"],
+                "properties": {
+                    "tracking_code": {
+                        "type": "string",
+                        "description": "Código de rastreio gerado pelos Correios (ex: BR123456789BR)",
+                    }
+                },
+            }
+        },
+        responses={
+            200: OpenApiTypes.OBJECT,
+            400: OpenApiTypes.OBJECT,
+            403: OpenApiTypes.OBJECT,
+            404: OpenApiTypes.OBJECT,
+        },
+    )
+    def patch(self, request, order_id):
+        if not (request.user.is_staff or request.user.is_superuser):
+            return Response(
+                {"message": "Apenas administradores podem registrar códigos de rastreio."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        order = CustomerOrder.objects.filter(id=order_id).first()
+        if order is None:
+            return Response(
+                {"message": "Pedido não encontrado."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        tracking_code = request.data.get("tracking_code", "").strip()
+        if not tracking_code:
+            return Response(
+                {"message": "O campo tracking_code é obrigatório."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        unshippable_statuses = [OrderStatus.DELIVERED, OrderStatus.CANCELED]
+        if order.status in unshippable_statuses:
+            return Response(
+                {"message": f"Não é possível registrar rastreio em pedido com status '{order.status}'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        order.tracking_code = tracking_code
+        order.status = OrderStatus.SHIPPED
+        order.save(update_fields=["tracking_code", "status", "updated_at"])
+
+        return Response(
+            {
+                "message": "Código de rastreio registrado com sucesso.",
+                "order_id": str(order.id),
+                "tracking_code": order.tracking_code,
+                "status": order.status,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def get_order_if_user_has_permission(self, user, order_id):
+        if user.is_staff or user.is_superuser:
+            return CustomerOrder.objects.filter(id=order_id).first()
+        return CustomerOrder.objects.filter(id=order_id, user=user).first()
