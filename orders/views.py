@@ -21,7 +21,9 @@ from products.models import ProductVariation
 
 from .correios import (
     CorreiosAuthenticationError,
+    CorreiosPrePostagemError,
     CorreiosTrackingUnavailableError,
+    dispatch_order_and_get_tracking_code,
     get_order_tracking_data,
 )
 from .models import (
@@ -581,3 +583,78 @@ class OrderTrackingView(APIView):
         if user.is_staff or user.is_superuser:
             return CustomerOrder.objects.filter(id=order_id).first()
         return CustomerOrder.objects.filter(id=order_id, user=user).first()
+
+
+class OrderDispatchView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        summary="Despachar Pedido via Pré-Postagem Correios (Admin)",
+        description=(
+            "Cria automaticamente um objeto postal nos Correios via API de Pré-Postagem, "
+            "obtém o código de rastreio gerado e atualiza o status do pedido para `SHIPPED`.\n\n"
+            "Restrito a administradores. Use este endpoint em vez do PATCH de rastreio manual "
+            "quando quiser que o sistema gere o código automaticamente."
+        ),
+        responses={
+            200: OpenApiTypes.OBJECT,
+            400: OpenApiTypes.OBJECT,
+            403: OpenApiTypes.OBJECT,
+            404: OpenApiTypes.OBJECT,
+            503: OpenApiTypes.OBJECT,
+        },
+    )
+    def post(self, request, order_id):
+        if not (request.user.is_staff or request.user.is_superuser):
+            return Response(
+                {"message": "Apenas administradores podem despachar pedidos."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        order = (
+            CustomerOrder.objects.select_related("user", "user__profile")
+            .filter(id=order_id)
+            .first()
+        )
+        if order is None:
+            return Response(
+                {"message": "Pedido não encontrado."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        undispatchable_statuses = [OrderStatus.DELIVERED, OrderStatus.CANCELED, OrderStatus.SHIPPED]
+        if order.status in undispatchable_statuses:
+            return Response(
+                {"message": f"Pedido com status '{order.status}' não pode ser despachado."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            tracking_code = dispatch_order_and_get_tracking_code(order)
+        except (CorreiosAuthenticationError, CorreiosPrePostagemError, Exception):
+            logger.exception(
+                "Falha ao criar pré-postagem nos Correios para o pedido %s", order_id
+            )
+            return Response(
+                {
+                    "message": (
+                        "Falha ao registrar envio nos Correios. "
+                        "Tente novamente ou registre o código manualmente."
+                    )
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        order.tracking_code = tracking_code
+        order.status = OrderStatus.SHIPPED
+        order.save(update_fields=["tracking_code", "status", "updated_at"])
+
+        return Response(
+            {
+                "message": "Pedido despachado com sucesso via Correios.",
+                "order_id": str(order.id),
+                "tracking_code": tracking_code,
+                "status": order.status,
+            },
+            status=status.HTTP_200_OK,
+        )
