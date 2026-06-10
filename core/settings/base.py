@@ -282,6 +282,10 @@ SPECTACULAR_SETTINGS = {
             "name": "Stock",
             "description": "Movimentações e histórico de estoque por variação.",
         },
+        {
+            "name": "Cart",
+            "description": "Gestão do carrinho de compras para utilizadores autenticados e anônimos.",
+        },
     ],
     # Swagger UI — aparência e comportamento
     "SWAGGER_UI_SETTINGS": {

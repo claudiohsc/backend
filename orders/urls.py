@@ -8,6 +8,9 @@ from .views import (
     OrderDispatchView,
     OrderTrackingView,
     PaymentSuccessRedirectView,
+    CartAPIView,
+    CartItemAddAPIView,
+    CartItemDetailAPIView,
 )
 
 app_name = "orders"
@@ -35,5 +38,12 @@ urlpatterns = [
         "<uuid:order_id>/despachar/",
         OrderDispatchView.as_view(),
         name="order-dispatch",
+    ),
+    path("cart/", CartAPIView.as_view(), name="cart"),
+    path("cart/items/", CartItemAddAPIView.as_view(), name="cart_add"),
+    path(
+        "cart/items/<uuid:variation_id>/",
+        CartItemDetailAPIView.as_view(),
+        name="cart_item_detail",
     ),
 ]

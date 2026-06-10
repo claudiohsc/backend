@@ -127,3 +127,31 @@ class OrderStatusUpdateSerializer(serializers.Serializer):
     )
     tracking_code = serializers.CharField(allow_blank=True, required=False)
     comment = serializers.CharField(allow_blank=True, required=False)
+
+
+class CartItemRepresentationSerializer(serializers.Serializer):
+    variation_id = serializers.UUIDField()
+    product_id = serializers.UUIDField()
+    product_name = serializers.CharField()
+    size = serializers.CharField()
+    sku = serializers.CharField()
+    quantity = serializers.IntegerField()
+    unit_price = serializers.DecimalField(max_digits=10, decimal_places=2)
+    total_price = serializers.DecimalField(max_digits=10, decimal_places=2)
+    stock_quantity = serializers.IntegerField()
+
+
+class CartRepresentationSerializer(serializers.Serializer):
+    id = serializers.UUIDField(allow_null=True)
+    items = CartItemRepresentationSerializer(many=True)
+    subtotal = serializers.DecimalField(max_digits=10, decimal_places=2)
+
+
+class CartItemAddSerializer(serializers.Serializer):
+    variation_id = serializers.UUIDField()
+    quantity = serializers.IntegerField(min_value=1)
+
+
+class CartItemUpdateSerializer(serializers.Serializer):
+    quantity = serializers.IntegerField(min_value=1)
+
