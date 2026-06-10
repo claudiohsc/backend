@@ -27,8 +27,12 @@ from .serializers import (
 )
 from .services import GoogleAuthService, InvalidGoogleTokenException
 
+from orders.services import merge_session_cart_to_db
+
 logger = logging.getLogger(__name__)
 User = get_user_model()
+
+
 
 
 def get_tokens_for_user(user) -> dict:
@@ -183,6 +187,8 @@ class GoogleLoginView(APIView):
                 {"error": "Erro interno no servidor. Tente novamente."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+        merge_session_cart_to_db(request, user)
 
         tokens = get_tokens_for_user(user)
         user_data = UserSerializer(user).data

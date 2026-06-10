@@ -28,6 +28,7 @@ from .correios import (
 )
 from .models import (
     Cart,
+    CartItem,
     CustomerOrder,
     OrderItem,
     OrderStatus,
@@ -39,8 +40,20 @@ from .serializers import (
     DashboardRecentOrderSerializer,
     OrderDetailSerializer,
     OrderStatusUpdateSerializer,
+    CartItemRepresentationSerializer,
+    CartRepresentationSerializer,
+    CartItemAddSerializer,
+    CartItemUpdateSerializer,
 )
-from .services import check_payment_status, create_infinitepay_checkout
+from .services import (
+    check_payment_status,
+    create_infinitepay_checkout,
+    get_cart_data,
+    add_item_to_cart,
+    update_item_quantity,
+    remove_item_from_cart,
+    clear_cart,
+)
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -658,3 +671,125 @@ class OrderDispatchView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class CartAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        tags=["Cart"],
+        summary="Recuperar Carrinho",
+        description="Retorna o carrinho de compras atual do utilizador (autenticado ou anónimo).",
+        responses={200: CartRepresentationSerializer},
+    )
+    def get(self, request):
+        cart_data = get_cart_data(request)
+        serializer = CartRepresentationSerializer(cart_data)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        tags=["Cart"],
+        summary="Limpar Carrinho",
+        description="Remove todos os itens do carrinho de compras.",
+        responses={200: CartRepresentationSerializer},
+    )
+    def delete(self, request):
+        clear_cart(request)
+        cart_data = get_cart_data(request)
+        serializer = CartRepresentationSerializer(cart_data)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class CartItemAddAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        tags=["Cart"],
+        summary="Adicionar Item ao Carrinho",
+        description="Adiciona uma variação de produto ao carrinho. Se já existir, incrementa a quantidade.",
+        request=CartItemAddSerializer,
+        responses={
+            200: CartRepresentationSerializer,
+            400: inline_serializer(
+                name="CartErrorResponse",
+                fields={"message": serializers.CharField()}
+            ),
+            404: inline_serializer(
+                name="CartNotFoundResponse",
+                fields={"detail": serializers.CharField()}
+            ),
+        },
+    )
+    def post(self, request):
+        serializer = CartItemAddSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        variation_id = serializer.validated_data["variation_id"]
+        quantity = serializer.validated_data["quantity"]
+
+        try:
+            add_item_to_cart(request, variation_id, quantity)
+        except ValueError as e:
+            return Response({"message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        cart_data = get_cart_data(request)
+        return Response(CartRepresentationSerializer(cart_data).data, status=status.HTTP_200_OK)
+
+
+class CartItemDetailAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        tags=["Cart"],
+        summary="Atualizar Quantidade do Item",
+        description="Atualiza a quantidade absoluta de um item no carrinho.",
+        request=CartItemUpdateSerializer,
+        responses={
+            200: CartRepresentationSerializer,
+            400: inline_serializer(
+                name="CartUpdateErrorResponse",
+                fields={"message": serializers.CharField()}
+            ),
+            404: inline_serializer(
+                name="CartUpdateNotFoundResponse",
+                fields={"detail": serializers.CharField()}
+            ),
+        },
+    )
+    def patch(self, request, variation_id):
+        serializer = CartItemUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        quantity = serializer.validated_data["quantity"]
+
+        try:
+            update_item_quantity(request, variation_id, quantity)
+        except ValueError as e:
+            return Response({"message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except (KeyError, CartItem.DoesNotExist):
+            return Response({"detail": "Item não encontrado no carrinho."}, status=status.HTTP_404_NOT_FOUND)
+
+        cart_data = get_cart_data(request)
+        return Response(CartRepresentationSerializer(cart_data).data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        tags=["Cart"],
+        summary="Remover Item do Carrinho",
+        description="Remove um item (variação de produto) do carrinho.",
+        responses={
+            200: CartRepresentationSerializer,
+            404: inline_serializer(
+                name="CartRemoveNotFoundResponse",
+                fields={"detail": serializers.CharField()}
+            ),
+        },
+    )
+    def delete(self, request, variation_id):
+        try:
+            remove_item_from_cart(request, variation_id)
+        except (KeyError, CartItem.DoesNotExist):
+            return Response({"detail": "Item não encontrado no carrinho."}, status=status.HTTP_404_NOT_FOUND)
+
+        cart_data = get_cart_data(request)
+        return Response(CartRepresentationSerializer(cart_data).data, status=status.HTTP_200_OK)
+

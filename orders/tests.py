@@ -749,3 +749,252 @@ class OrderDispatchViewTests(APITestCase):
         self.client.force_authenticate(user=self.admin)
         response = self.client.post(self.dispatch_url(self.order.id))
         self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+
+
+class CartAPITests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="cliente_cart@shio.com", name="Cliente Cart", password="password_123"
+        )
+        self.category = Category.objects.create(name="Calçados", slug="calcados")
+        self.product = Product.objects.create(
+            category=self.category, name="Tênis Teste", base_price=150.00
+        )
+        self.variation = ProductVariation.objects.create(
+            product=self.product, size="40", sku="TENIS-40", stock_quantity=5
+        )
+        self.variation_out_of_stock = ProductVariation.objects.create(
+            product=self.product, size="41", sku="TENIS-41", stock_quantity=0
+        )
+
+        self.cart_url = "/api/orders/cart/"
+        self.cart_items_url = "/api/orders/cart/items/"
+
+    def test_anonymous_get_empty_cart(self):
+        response = self.client.get(self.cart_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertIsNone(data["id"])
+        self.assertEqual(len(data["items"]), 0)
+        self.assertEqual(float(data["subtotal"]), 0.00)
+
+    def test_anonymous_add_item(self):
+        response = self.client.post(self.cart_items_url, {
+            "variation_id": str(self.variation.id),
+            "quantity": 2
+        }, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(len(data["items"]), 1)
+        self.assertEqual(data["items"][0]["quantity"], 2)
+        self.assertEqual(float(data["subtotal"]), 300.00)
+
+    def test_anonymous_add_duplicate_item(self):
+        self.client.post(self.cart_items_url, {
+            "variation_id": str(self.variation.id),
+            "quantity": 1
+        }, format="json")
+        response = self.client.post(self.cart_items_url, {
+            "variation_id": str(self.variation.id),
+            "quantity": 2
+        }, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(data["items"][0]["quantity"], 3)
+        self.assertEqual(float(data["subtotal"]), 450.00)
+
+    def test_anonymous_add_insufficient_stock(self):
+        response = self.client.post(self.cart_items_url, {
+            "variation_id": str(self.variation_out_of_stock.id),
+            "quantity": 1
+        }, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_anonymous_update_quantity(self):
+        self.client.post(self.cart_items_url, {
+            "variation_id": str(self.variation.id),
+            "quantity": 2
+        }, format="json")
+        url = f"{self.cart_items_url}{self.variation.id}/"
+        response = self.client.patch(url, {"quantity": 4}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(data["items"][0]["quantity"], 4)
+
+    def test_anonymous_update_insufficient_stock(self):
+        self.client.post(self.cart_items_url, {
+            "variation_id": str(self.variation.id),
+            "quantity": 2
+        }, format="json")
+        url = f"{self.cart_items_url}{self.variation.id}/"
+        response = self.client.patch(url, {"quantity": 6}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_anonymous_remove_item(self):
+        self.client.post(self.cart_items_url, {
+            "variation_id": str(self.variation.id),
+            "quantity": 2
+        }, format="json")
+        url = f"{self.cart_items_url}{self.variation.id}/"
+        response = self.client.delete(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(len(data["items"]), 0)
+
+    def test_anonymous_clear_cart(self):
+        self.client.post(self.cart_items_url, {
+            "variation_id": str(self.variation.id),
+            "quantity": 2
+        }, format="json")
+        response = self.client.delete(self.cart_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(len(data["items"]), 0)
+
+    def test_authenticated_get_empty_cart(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(self.cart_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(len(data["items"]), 0)
+
+    def test_authenticated_add_item(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(self.cart_items_url, {
+            "variation_id": str(self.variation.id),
+            "quantity": 2
+        }, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertIsNotNone(data["id"])
+        self.assertEqual(len(data["items"]), 1)
+        self.assertEqual(data["items"][0]["quantity"], 2)
+
+        # Check DB
+        cart = Cart.objects.get(user=self.user, status="ACTIVE")
+        self.assertEqual(cart.items.count(), 1)
+
+    def test_authenticated_add_duplicate_item(self):
+        self.client.force_authenticate(user=self.user)
+        self.client.post(self.cart_items_url, {
+            "variation_id": str(self.variation.id),
+            "quantity": 1
+        }, format="json")
+        response = self.client.post(self.cart_items_url, {
+            "variation_id": str(self.variation.id),
+            "quantity": 2
+        }, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(data["items"][0]["quantity"], 3)
+
+    def test_authenticated_update_quantity(self):
+        self.client.force_authenticate(user=self.user)
+        self.client.post(self.cart_items_url, {
+            "variation_id": str(self.variation.id),
+            "quantity": 2
+        }, format="json")
+        url = f"{self.cart_items_url}{self.variation.id}/"
+        response = self.client.patch(url, {"quantity": 4}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(data["items"][0]["quantity"], 4)
+
+    def test_authenticated_remove_item(self):
+        self.client.force_authenticate(user=self.user)
+        self.client.post(self.cart_items_url, {
+            "variation_id": str(self.variation.id),
+            "quantity": 2
+        }, format="json")
+        url = f"{self.cart_items_url}{self.variation.id}/"
+        response = self.client.delete(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(len(data["items"]), 0)
+
+    def test_authenticated_clear_cart(self):
+        self.client.force_authenticate(user=self.user)
+        self.client.post(self.cart_items_url, {
+            "variation_id": str(self.variation.id),
+            "quantity": 2
+        }, format="json")
+        response = self.client.delete(self.cart_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(len(data["items"]), 0)
+
+    @patch("authentication.services.id_token.verify_oauth2_token")
+    @patch(
+        "authentication.services.settings.GOOGLE_CLIENT_ID",
+        "test-client-id.apps.googleusercontent.com",
+    )
+    def test_login_merges_session_cart_to_db(self, mock_verify):
+        mock_verify.return_value = {
+            "sub": "google-oauth-12345",
+            "email": "test_merge@example.com",
+            "name": "Test Merge User",
+            "picture": "https://example.com/avatar.jpg",
+            "email_verified": True,
+            "aud": "test-client-id.apps.googleusercontent.com",
+        }
+
+        # Add item to session cart (anonymous)
+        response = self.client.post(self.cart_items_url, {
+            "variation_id": str(self.variation.id),
+            "quantity": 2
+        }, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Login with Google
+        login_url = "/api/auth/google/"
+        login_response = self.client.post(login_url, {"id_token": "valid-token"}, format="json")
+        self.assertEqual(login_response.status_code, status.HTTP_201_CREATED)
+
+        # Verify session is cleared
+        self.assertNotIn("cart", self.client.session)
+
+        # Verify DB cart contains merged items
+        user = User.objects.get(email="test_merge@example.com")
+        cart = Cart.objects.get(user=user, status="ACTIVE")
+        cart_item = CartItem.objects.get(cart=cart, variation=self.variation)
+        self.assertEqual(cart_item.quantity, 2)
+
+    @patch("authentication.services.id_token.verify_oauth2_token")
+    @patch(
+        "authentication.services.settings.GOOGLE_CLIENT_ID",
+        "test-client-id.apps.googleusercontent.com",
+    )
+    def test_login_merges_session_cart_with_existing_db_cart(self, mock_verify):
+        # Create user and active cart in DB
+        user = User.objects.create_user(
+            email="test_merge_existing@example.com",
+            name="Existing Merge User",
+            google_id="google-oauth-123456"
+        )
+        db_cart = Cart.objects.create(user=user, status="ACTIVE")
+        CartItem.objects.create(cart=db_cart, variation=self.variation, quantity=1, unit_price=150.00)
+
+        mock_verify.return_value = {
+            "sub": "google-oauth-123456",
+            "email": "test_merge_existing@example.com",
+            "name": "Existing Merge User",
+            "picture": "https://example.com/avatar.jpg",
+            "email_verified": True,
+            "aud": "test-client-id.apps.googleusercontent.com",
+        }
+
+        # Add item to session cart (anonymous)
+        self.client.post(self.cart_items_url, {
+            "variation_id": str(self.variation.id),
+            "quantity": 2
+        }, format="json")
+
+        # Login
+        login_url = "/api/auth/google/"
+        login_response = self.client.post(login_url, {"id_token": "valid-token"}, format="json")
+        self.assertEqual(login_response.status_code, status.HTTP_200_OK)
+
+        # Verify DB cart quantity is summed
+        cart_item = CartItem.objects.get(cart=db_cart, variation=self.variation)
+        self.assertEqual(cart_item.quantity, 3)
+
