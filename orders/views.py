@@ -36,23 +36,22 @@ from .models import (
     PaymentStatus,
 )
 from .serializers import (
+    CartItemAddSerializer,
+    CartItemUpdateSerializer,
+    CartRepresentationSerializer,
     DashboardLowStockSerializer,
     DashboardRecentOrderSerializer,
     OrderDetailSerializer,
     OrderStatusUpdateSerializer,
-    CartItemRepresentationSerializer,
-    CartRepresentationSerializer,
-    CartItemAddSerializer,
-    CartItemUpdateSerializer,
 )
 from .services import (
+    add_item_to_cart,
     check_payment_status,
+    clear_cart,
     create_infinitepay_checkout,
     get_cart_data,
-    add_item_to_cart,
-    update_item_quantity,
     remove_item_from_cart,
-    clear_cart,
+    update_item_quantity,
 )
 
 User = get_user_model()
@@ -518,8 +517,14 @@ class OrderTrackingView(APIView):
         try:
             tracking_data = get_order_tracking_data(order.tracking_code)
             return Response(tracking_data, status=status.HTTP_200_OK)
-        except (CorreiosAuthenticationError, CorreiosTrackingUnavailableError, Exception):
-            logger.exception("Falha ao consultar rastreio dos Correios para o pedido %s", order_id)
+        except (
+            CorreiosAuthenticationError,
+            CorreiosTrackingUnavailableError,
+            Exception,
+        ):
+            logger.exception(
+                "Falha ao consultar rastreio dos Correios para o pedido %s", order_id
+            )
             return Response(
                 {"message": "Serviço de rastreio temporariamente indisponível."},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -553,7 +558,9 @@ class OrderTrackingView(APIView):
     def patch(self, request, order_id):
         if not (request.user.is_staff or request.user.is_superuser):
             return Response(
-                {"message": "Apenas administradores podem registrar códigos de rastreio."},
+                {
+                    "message": "Apenas administradores podem registrar códigos de rastreio."
+                },
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -574,7 +581,9 @@ class OrderTrackingView(APIView):
         unshippable_statuses = [OrderStatus.DELIVERED, OrderStatus.CANCELED]
         if order.status in unshippable_statuses:
             return Response(
-                {"message": f"Não é possível registrar rastreio em pedido com status '{order.status}'."},
+                {
+                    "message": f"Não é possível registrar rastreio em pedido com status '{order.status}'."
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -635,10 +644,16 @@ class OrderDispatchView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        undispatchable_statuses = [OrderStatus.DELIVERED, OrderStatus.CANCELED, OrderStatus.SHIPPED]
+        undispatchable_statuses = [
+            OrderStatus.DELIVERED,
+            OrderStatus.CANCELED,
+            OrderStatus.SHIPPED,
+        ]
         if order.status in undispatchable_statuses:
             return Response(
-                {"message": f"Pedido com status '{order.status}' não pode ser despachado."},
+                {
+                    "message": f"Pedido com status '{order.status}' não pode ser despachado."
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -711,12 +726,10 @@ class CartItemAddAPIView(APIView):
         responses={
             200: CartRepresentationSerializer,
             400: inline_serializer(
-                name="CartErrorResponse",
-                fields={"message": serializers.CharField()}
+                name="CartErrorResponse", fields={"message": serializers.CharField()}
             ),
             404: inline_serializer(
-                name="CartNotFoundResponse",
-                fields={"detail": serializers.CharField()}
+                name="CartNotFoundResponse", fields={"detail": serializers.CharField()}
             ),
         },
     )
@@ -733,7 +746,9 @@ class CartItemAddAPIView(APIView):
             return Response({"message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         cart_data = get_cart_data(request)
-        return Response(CartRepresentationSerializer(cart_data).data, status=status.HTTP_200_OK)
+        return Response(
+            CartRepresentationSerializer(cart_data).data, status=status.HTTP_200_OK
+        )
 
 
 class CartItemDetailAPIView(APIView):
@@ -748,11 +763,11 @@ class CartItemDetailAPIView(APIView):
             200: CartRepresentationSerializer,
             400: inline_serializer(
                 name="CartUpdateErrorResponse",
-                fields={"message": serializers.CharField()}
+                fields={"message": serializers.CharField()},
             ),
             404: inline_serializer(
                 name="CartUpdateNotFoundResponse",
-                fields={"detail": serializers.CharField()}
+                fields={"detail": serializers.CharField()},
             ),
         },
     )
@@ -767,10 +782,15 @@ class CartItemDetailAPIView(APIView):
         except ValueError as e:
             return Response({"message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except (KeyError, CartItem.DoesNotExist):
-            return Response({"detail": "Item não encontrado no carrinho."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"detail": "Item não encontrado no carrinho."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
         cart_data = get_cart_data(request)
-        return Response(CartRepresentationSerializer(cart_data).data, status=status.HTTP_200_OK)
+        return Response(
+            CartRepresentationSerializer(cart_data).data, status=status.HTTP_200_OK
+        )
 
     @extend_schema(
         tags=["Cart"],
@@ -780,7 +800,7 @@ class CartItemDetailAPIView(APIView):
             200: CartRepresentationSerializer,
             404: inline_serializer(
                 name="CartRemoveNotFoundResponse",
-                fields={"detail": serializers.CharField()}
+                fields={"detail": serializers.CharField()},
             ),
         },
     )
@@ -788,8 +808,12 @@ class CartItemDetailAPIView(APIView):
         try:
             remove_item_from_cart(request, variation_id)
         except (KeyError, CartItem.DoesNotExist):
-            return Response({"detail": "Item não encontrado no carrinho."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"detail": "Item não encontrado no carrinho."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
         cart_data = get_cart_data(request)
-        return Response(CartRepresentationSerializer(cart_data).data, status=status.HTTP_200_OK)
-
+        return Response(
+            CartRepresentationSerializer(cart_data).data, status=status.HTTP_200_OK
+        )

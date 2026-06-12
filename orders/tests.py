@@ -254,14 +254,21 @@ class OrderTrackingViewTests(APITestCase):
         return f"/api/orders/{order_id}/tracking/"
 
     @patch("orders.views.get_order_tracking_data")
-    def test_cliente_consulta_rastreio_do_proprio_pedido_com_sucesso(self, mock_get_tracking):
+    def test_cliente_consulta_rastreio_do_proprio_pedido_com_sucesso(
+        self, mock_get_tracking
+    ):
         """Cliente autenticado deve receber o histórico de rastreio do seu pedido."""
         mock_get_tracking.return_value = {
             "tracking_code": "BR123456789BR",
             "status_atual": "Objeto em trânsito",
             "previsao_entrega": "2024-06-10T18:00:00",
             "eventos": [
-                {"data": "2024-06-08T10:00:00", "descricao": "Objeto postado", "detalhe": "", "local": "BRASILIA - DF"}
+                {
+                    "data": "2024-06-08T10:00:00",
+                    "descricao": "Objeto postado",
+                    "detalhe": "",
+                    "local": "BRASILIA - DF",
+                }
             ],
         }
 
@@ -273,7 +280,9 @@ class OrderTrackingViewTests(APITestCase):
         mock_get_tracking.assert_called_once_with("BR123456789BR")
 
     @patch("orders.views.get_order_tracking_data")
-    def test_pedido_sem_codigo_de_rastreio_retorna_status_not_shipped(self, mock_get_tracking):
+    def test_pedido_sem_codigo_de_rastreio_retorna_status_not_shipped(
+        self, mock_get_tracking
+    ):
         """Pedido ainda não despachado deve retornar status not_shipped sem erro."""
         mock_get_tracking.return_value = {
             "tracking_code": None,
@@ -666,7 +675,9 @@ class OrderDispatchViewTests(APITestCase):
             email="dispatch_admin@shio.com", name="Admin Dispatch", is_staff=True
         )
         self.customer = User.objects.create_user(
-            email="dispatch_cliente@shio.com", name="Cliente Dispatch", password="senha_forte_123"
+            email="dispatch_cliente@shio.com",
+            name="Cliente Dispatch",
+            password="senha_forte_123",
         )
         self.order = CustomerOrder.objects.create(
             user=self.customer,
@@ -779,10 +790,11 @@ class CartAPITests(APITestCase):
         self.assertEqual(float(data["subtotal"]), 0.00)
 
     def test_anonymous_add_item(self):
-        response = self.client.post(self.cart_items_url, {
-            "variation_id": str(self.variation.id),
-            "quantity": 2
-        }, format="json")
+        response = self.client.post(
+            self.cart_items_url,
+            {"variation_id": str(self.variation.id), "quantity": 2},
+            format="json",
+        )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         data = response.json()
         self.assertEqual(len(data["items"]), 1)
@@ -790,31 +802,35 @@ class CartAPITests(APITestCase):
         self.assertEqual(float(data["subtotal"]), 300.00)
 
     def test_anonymous_add_duplicate_item(self):
-        self.client.post(self.cart_items_url, {
-            "variation_id": str(self.variation.id),
-            "quantity": 1
-        }, format="json")
-        response = self.client.post(self.cart_items_url, {
-            "variation_id": str(self.variation.id),
-            "quantity": 2
-        }, format="json")
+        self.client.post(
+            self.cart_items_url,
+            {"variation_id": str(self.variation.id), "quantity": 1},
+            format="json",
+        )
+        response = self.client.post(
+            self.cart_items_url,
+            {"variation_id": str(self.variation.id), "quantity": 2},
+            format="json",
+        )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         data = response.json()
         self.assertEqual(data["items"][0]["quantity"], 3)
         self.assertEqual(float(data["subtotal"]), 450.00)
 
     def test_anonymous_add_insufficient_stock(self):
-        response = self.client.post(self.cart_items_url, {
-            "variation_id": str(self.variation_out_of_stock.id),
-            "quantity": 1
-        }, format="json")
+        response = self.client.post(
+            self.cart_items_url,
+            {"variation_id": str(self.variation_out_of_stock.id), "quantity": 1},
+            format="json",
+        )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_anonymous_update_quantity(self):
-        self.client.post(self.cart_items_url, {
-            "variation_id": str(self.variation.id),
-            "quantity": 2
-        }, format="json")
+        self.client.post(
+            self.cart_items_url,
+            {"variation_id": str(self.variation.id), "quantity": 2},
+            format="json",
+        )
         url = f"{self.cart_items_url}{self.variation.id}/"
         response = self.client.patch(url, {"quantity": 4}, format="json")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -822,19 +838,21 @@ class CartAPITests(APITestCase):
         self.assertEqual(data["items"][0]["quantity"], 4)
 
     def test_anonymous_update_insufficient_stock(self):
-        self.client.post(self.cart_items_url, {
-            "variation_id": str(self.variation.id),
-            "quantity": 2
-        }, format="json")
+        self.client.post(
+            self.cart_items_url,
+            {"variation_id": str(self.variation.id), "quantity": 2},
+            format="json",
+        )
         url = f"{self.cart_items_url}{self.variation.id}/"
         response = self.client.patch(url, {"quantity": 6}, format="json")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_anonymous_remove_item(self):
-        self.client.post(self.cart_items_url, {
-            "variation_id": str(self.variation.id),
-            "quantity": 2
-        }, format="json")
+        self.client.post(
+            self.cart_items_url,
+            {"variation_id": str(self.variation.id), "quantity": 2},
+            format="json",
+        )
         url = f"{self.cart_items_url}{self.variation.id}/"
         response = self.client.delete(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -842,10 +860,11 @@ class CartAPITests(APITestCase):
         self.assertEqual(len(data["items"]), 0)
 
     def test_anonymous_clear_cart(self):
-        self.client.post(self.cart_items_url, {
-            "variation_id": str(self.variation.id),
-            "quantity": 2
-        }, format="json")
+        self.client.post(
+            self.cart_items_url,
+            {"variation_id": str(self.variation.id), "quantity": 2},
+            format="json",
+        )
         response = self.client.delete(self.cart_url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         data = response.json()
@@ -860,10 +879,11 @@ class CartAPITests(APITestCase):
 
     def test_authenticated_add_item(self):
         self.client.force_authenticate(user=self.user)
-        response = self.client.post(self.cart_items_url, {
-            "variation_id": str(self.variation.id),
-            "quantity": 2
-        }, format="json")
+        response = self.client.post(
+            self.cart_items_url,
+            {"variation_id": str(self.variation.id), "quantity": 2},
+            format="json",
+        )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         data = response.json()
         self.assertIsNotNone(data["id"])
@@ -876,24 +896,27 @@ class CartAPITests(APITestCase):
 
     def test_authenticated_add_duplicate_item(self):
         self.client.force_authenticate(user=self.user)
-        self.client.post(self.cart_items_url, {
-            "variation_id": str(self.variation.id),
-            "quantity": 1
-        }, format="json")
-        response = self.client.post(self.cart_items_url, {
-            "variation_id": str(self.variation.id),
-            "quantity": 2
-        }, format="json")
+        self.client.post(
+            self.cart_items_url,
+            {"variation_id": str(self.variation.id), "quantity": 1},
+            format="json",
+        )
+        response = self.client.post(
+            self.cart_items_url,
+            {"variation_id": str(self.variation.id), "quantity": 2},
+            format="json",
+        )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         data = response.json()
         self.assertEqual(data["items"][0]["quantity"], 3)
 
     def test_authenticated_update_quantity(self):
         self.client.force_authenticate(user=self.user)
-        self.client.post(self.cart_items_url, {
-            "variation_id": str(self.variation.id),
-            "quantity": 2
-        }, format="json")
+        self.client.post(
+            self.cart_items_url,
+            {"variation_id": str(self.variation.id), "quantity": 2},
+            format="json",
+        )
         url = f"{self.cart_items_url}{self.variation.id}/"
         response = self.client.patch(url, {"quantity": 4}, format="json")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -902,10 +925,11 @@ class CartAPITests(APITestCase):
 
     def test_authenticated_remove_item(self):
         self.client.force_authenticate(user=self.user)
-        self.client.post(self.cart_items_url, {
-            "variation_id": str(self.variation.id),
-            "quantity": 2
-        }, format="json")
+        self.client.post(
+            self.cart_items_url,
+            {"variation_id": str(self.variation.id), "quantity": 2},
+            format="json",
+        )
         url = f"{self.cart_items_url}{self.variation.id}/"
         response = self.client.delete(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -914,10 +938,11 @@ class CartAPITests(APITestCase):
 
     def test_authenticated_clear_cart(self):
         self.client.force_authenticate(user=self.user)
-        self.client.post(self.cart_items_url, {
-            "variation_id": str(self.variation.id),
-            "quantity": 2
-        }, format="json")
+        self.client.post(
+            self.cart_items_url,
+            {"variation_id": str(self.variation.id), "quantity": 2},
+            format="json",
+        )
         response = self.client.delete(self.cart_url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         data = response.json()
@@ -939,15 +964,18 @@ class CartAPITests(APITestCase):
         }
 
         # Add item to session cart (anonymous)
-        response = self.client.post(self.cart_items_url, {
-            "variation_id": str(self.variation.id),
-            "quantity": 2
-        }, format="json")
+        response = self.client.post(
+            self.cart_items_url,
+            {"variation_id": str(self.variation.id), "quantity": 2},
+            format="json",
+        )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
         # Login with Google
         login_url = "/api/auth/google/"
-        login_response = self.client.post(login_url, {"id_token": "valid-token"}, format="json")
+        login_response = self.client.post(
+            login_url, {"id_token": "valid-token"}, format="json"
+        )
         self.assertEqual(login_response.status_code, status.HTTP_201_CREATED)
 
         # Verify session is cleared
@@ -969,10 +997,12 @@ class CartAPITests(APITestCase):
         user = User.objects.create_user(
             email="test_merge_existing@example.com",
             name="Existing Merge User",
-            google_id="google-oauth-123456"
+            google_id="google-oauth-123456",
         )
         db_cart = Cart.objects.create(user=user, status="ACTIVE")
-        CartItem.objects.create(cart=db_cart, variation=self.variation, quantity=1, unit_price=150.00)
+        CartItem.objects.create(
+            cart=db_cart, variation=self.variation, quantity=1, unit_price=150.00
+        )
 
         mock_verify.return_value = {
             "sub": "google-oauth-123456",
@@ -984,17 +1014,19 @@ class CartAPITests(APITestCase):
         }
 
         # Add item to session cart (anonymous)
-        self.client.post(self.cart_items_url, {
-            "variation_id": str(self.variation.id),
-            "quantity": 2
-        }, format="json")
+        self.client.post(
+            self.cart_items_url,
+            {"variation_id": str(self.variation.id), "quantity": 2},
+            format="json",
+        )
 
         # Login
         login_url = "/api/auth/google/"
-        login_response = self.client.post(login_url, {"id_token": "valid-token"}, format="json")
+        login_response = self.client.post(
+            login_url, {"id_token": "valid-token"}, format="json"
+        )
         self.assertEqual(login_response.status_code, status.HTTP_200_OK)
 
         # Verify DB cart quantity is summed
         cart_item = CartItem.objects.get(cart=db_cart, variation=self.variation)
         self.assertEqual(cart_item.quantity, 3)
-

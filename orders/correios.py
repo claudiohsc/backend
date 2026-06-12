@@ -9,10 +9,18 @@ from django.core.cache import cache
 logger = logging.getLogger(__name__)
 
 CORREIOS_TOKEN_CACHE_KEY = "correios_access_token"
-CORREIOS_TOKEN_ENDPOINT = "https://api.correios.com.br/token/v1/autentica/cartaopostagem"
-CORREIOS_TRACKING_ENDPOINT = "https://api.correios.com.br/srorastro/v1/objetos/{codigo_objeto}"
-CORREIOS_PREPOSTAGEM_ENDPOINT = "https://api.correios.com.br/prepostagem/v1/prepostagens"
-CORREIOS_PREPOSTAGEM_DETAILS_ENDPOINT = "https://api.correios.com.br/prepostagem/v1/prepostagens/{id}"
+CORREIOS_TOKEN_ENDPOINT = (
+    "https://api.correios.com.br/token/v1/autentica/cartaopostagem"
+)
+CORREIOS_TRACKING_ENDPOINT = (
+    "https://api.correios.com.br/srorastro/v1/objetos/{codigo_objeto}"
+)
+CORREIOS_PREPOSTAGEM_ENDPOINT = (
+    "https://api.correios.com.br/prepostagem/v1/prepostagens"
+)
+CORREIOS_PREPOSTAGEM_DETAILS_ENDPOINT = (
+    "https://api.correios.com.br/prepostagem/v1/prepostagens/{id}"
+)
 
 
 class CorreiosAuthenticationError(Exception):
@@ -51,7 +59,9 @@ def request_new_correios_access_token() -> str:
     }
     payload = {"numero": cartao_postagem}
 
-    response = requests.post(CORREIOS_TOKEN_ENDPOINT, json=payload, headers=headers, timeout=10)
+    response = requests.post(
+        CORREIOS_TOKEN_ENDPOINT, json=payload, headers=headers, timeout=10
+    )
     response.raise_for_status()
 
     data = response.json()
@@ -59,7 +69,9 @@ def request_new_correios_access_token() -> str:
     expires_at = data.get("expiraEm")
 
     if not token or not expires_at:
-        raise CorreiosAuthenticationError("Resposta de autenticação dos Correios inválida.")
+        raise CorreiosAuthenticationError(
+            "Resposta de autenticação dos Correios inválida."
+        )
 
     ttl = calculate_token_ttl_in_seconds(expires_at)
     if ttl > 0:
@@ -120,7 +132,9 @@ def format_tracking_events_list(raw_events: list[dict]) -> list[dict]:
     return [format_single_tracking_event(event) for event in raw_events]
 
 
-def build_tracking_response_from_correios_data(tracking_code: str, correios_data: dict) -> dict:
+def build_tracking_response_from_correios_data(
+    tracking_code: str, correios_data: dict
+) -> dict:
     objects = correios_data.get("objetos", [])
     if not objects:
         return build_empty_tracking_response(tracking_code)
@@ -245,13 +259,17 @@ def create_prepostagem_at_correios(order) -> dict:
         "Accept": "application/json",
     }
 
-    response = requests.post(CORREIOS_PREPOSTAGEM_ENDPOINT, json=payload, headers=headers, timeout=15)
+    response = requests.post(
+        CORREIOS_PREPOSTAGEM_ENDPOINT, json=payload, headers=headers, timeout=15
+    )
 
     if response.status_code == 401:
         cache.delete(CORREIOS_TOKEN_CACHE_KEY)
         token = request_new_correios_access_token()
         headers["Authorization"] = f"Bearer {token}"
-        response = requests.post(CORREIOS_PREPOSTAGEM_ENDPOINT, json=payload, headers=headers, timeout=15)
+        response = requests.post(
+            CORREIOS_PREPOSTAGEM_ENDPOINT, json=payload, headers=headers, timeout=15
+        )
 
     if not response.ok:
         try:

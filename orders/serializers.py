@@ -154,4 +154,3 @@ class CartItemAddSerializer(serializers.Serializer):
 
 class CartItemUpdateSerializer(serializers.Serializer):
     quantity = serializers.IntegerField(min_value=1)
-

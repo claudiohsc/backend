@@ -1,11 +1,11 @@
 from decimal import Decimal
+
 import requests
 from django.conf import settings
 from django.shortcuts import get_object_or_404
 
-from orders.models import OrderStatus, Payment, PaymentStatus, Cart, CartItem
+from orders.models import Cart, CartItem, OrderStatus, Payment, PaymentStatus
 from products.models import ProductVariation
-
 
 
 def create_infinitepay_checkout(order, request):
@@ -114,17 +114,19 @@ def get_cart_data(request):
         for item in cart.items.select_related("variation", "variation__product").all():
             total_price = item.quantity * item.unit_price
             subtotal += total_price
-            items.append({
-                "variation_id": item.variation.id,
-                "product_id": item.variation.product.id,
-                "product_name": item.variation.product.name,
-                "size": item.variation.size,
-                "sku": item.variation.sku,
-                "quantity": item.quantity,
-                "unit_price": item.unit_price,
-                "total_price": total_price,
-                "stock_quantity": item.variation.stock_quantity,
-            })
+            items.append(
+                {
+                    "variation_id": item.variation.id,
+                    "product_id": item.variation.product.id,
+                    "product_name": item.variation.product.name,
+                    "size": item.variation.size,
+                    "sku": item.variation.sku,
+                    "quantity": item.quantity,
+                    "unit_price": item.unit_price,
+                    "total_price": total_price,
+                    "stock_quantity": item.variation.stock_quantity,
+                }
+            )
         return {
             "id": cart.id,
             "items": items,
@@ -137,7 +139,9 @@ def get_cart_data(request):
         invalid_variation_ids = []
 
         variation_ids = list(session_cart.keys())
-        variations = ProductVariation.objects.filter(id__in=variation_ids).select_related("product")
+        variations = ProductVariation.objects.filter(
+            id__in=variation_ids
+        ).select_related("product")
         variations_by_id = {str(v.id): v for v in variations}
 
         for var_id_str, item_data in session_cart.items():
@@ -148,22 +152,28 @@ def get_cart_data(request):
 
             quantity = item_data.get("quantity", 0)
             unit_price_str = item_data.get("unit_price")
-            unit_price = Decimal(unit_price_str) if unit_price_str else variation.product.base_price
+            unit_price = (
+                Decimal(unit_price_str)
+                if unit_price_str
+                else variation.product.base_price
+            )
 
             total_price = quantity * unit_price
             subtotal += total_price
 
-            items.append({
-                "variation_id": variation.id,
-                "product_id": variation.product.id,
-                "product_name": variation.product.name,
-                "size": variation.size,
-                "sku": variation.sku,
-                "quantity": quantity,
-                "unit_price": unit_price,
-                "total_price": total_price,
-                "stock_quantity": variation.stock_quantity,
-            })
+            items.append(
+                {
+                    "variation_id": variation.id,
+                    "product_id": variation.product.id,
+                    "product_name": variation.product.name,
+                    "size": variation.size,
+                    "sku": variation.sku,
+                    "quantity": quantity,
+                    "unit_price": unit_price,
+                    "total_price": total_price,
+                    "stock_quantity": variation.stock_quantity,
+                }
+            )
 
         if invalid_variation_ids:
             for iv_id in invalid_variation_ids:
@@ -179,19 +189,23 @@ def get_cart_data(request):
 
 
 def add_item_to_cart(request, variation_id, quantity):
-    variation = get_object_or_404(ProductVariation.objects.select_related("product"), id=variation_id)
+    variation = get_object_or_404(
+        ProductVariation.objects.select_related("product"), id=variation_id
+    )
 
     if request.user.is_authenticated:
         cart = get_or_create_user_cart(request.user)
         cart_item, _ = CartItem.objects.get_or_create(
             cart=cart,
             variation=variation,
-            defaults={"quantity": 0, "unit_price": variation.product.base_price}
+            defaults={"quantity": 0, "unit_price": variation.product.base_price},
         )
 
         new_quantity = cart_item.quantity + quantity
         if new_quantity > variation.stock_quantity:
-            raise ValueError(f"Estoque insuficiente para {variation.product.name}. Disponível: {variation.stock_quantity}")
+            raise ValueError(
+                f"Estoque insuficiente para {variation.product.name}. Disponível: {variation.stock_quantity}"
+            )
 
         cart_item.quantity = new_quantity
         cart_item.unit_price = variation.product.base_price
@@ -205,21 +219,27 @@ def add_item_to_cart(request, variation_id, quantity):
         new_quantity = current_quantity + quantity
 
         if new_quantity > variation.stock_quantity:
-            raise ValueError(f"Estoque insuficiente para {variation.product.name}. Disponível: {variation.stock_quantity}")
+            raise ValueError(
+                f"Estoque insuficiente para {variation.product.name}. Disponível: {variation.stock_quantity}"
+            )
 
         session_cart[var_id_str] = {
             "quantity": new_quantity,
-            "unit_price": str(variation.product.base_price)
+            "unit_price": str(variation.product.base_price),
         }
         request.session["cart"] = session_cart
         request.session.modified = True
 
 
 def update_item_quantity(request, variation_id, quantity):
-    variation = get_object_or_404(ProductVariation.objects.select_related("product"), id=variation_id)
+    variation = get_object_or_404(
+        ProductVariation.objects.select_related("product"), id=variation_id
+    )
 
     if quantity > variation.stock_quantity:
-        raise ValueError(f"Estoque insuficiente para {variation.product.name}. Disponível: {variation.stock_quantity}")
+        raise ValueError(
+            f"Estoque insuficiente para {variation.product.name}. Disponível: {variation.stock_quantity}"
+        )
 
     if request.user.is_authenticated:
         cart = get_or_create_user_cart(request.user)
@@ -273,7 +293,9 @@ def merge_session_cart_to_db(request, user):
 
     db_cart = get_or_create_user_cart(user)
     variation_ids = list(session_cart.keys())
-    variations = ProductVariation.objects.filter(id__in=variation_ids).select_related("product")
+    variations = ProductVariation.objects.filter(id__in=variation_ids).select_related(
+        "product"
+    )
     variations_by_id = {str(v.id): v for v in variations}
 
     for var_id_str, item_data in session_cart.items():
@@ -285,7 +307,7 @@ def merge_session_cart_to_db(request, user):
         cart_item, _ = CartItem.objects.get_or_create(
             cart=db_cart,
             variation=variation,
-            defaults={"quantity": 0, "unit_price": variation.product.base_price}
+            defaults={"quantity": 0, "unit_price": variation.product.base_price},
         )
 
         new_quantity = cart_item.quantity + quantity
@@ -298,4 +320,3 @@ def merge_session_cart_to_db(request, user):
 
     request.session.pop("cart", None)
     request.session.modified = True
-

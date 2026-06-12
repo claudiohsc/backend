@@ -16,6 +16,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from orders.services import merge_session_cart_to_db
+
 from .permissions import IsStaffOrSuperUser
 from .serializers import (
     CustomerCRMDetailSerializer,
@@ -27,12 +29,8 @@ from .serializers import (
 )
 from .services import GoogleAuthService, InvalidGoogleTokenException
 
-from orders.services import merge_session_cart_to_db
-
 logger = logging.getLogger(__name__)
 User = get_user_model()
-
-
 
 
 def get_tokens_for_user(user) -> dict:

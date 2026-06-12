@@ -4,13 +4,13 @@ from .views import (
     AdminDashboardView,
     AdminOrderDetailView,
     AdminOrderListView,
+    CartAPIView,
+    CartItemAddAPIView,
+    CartItemDetailAPIView,
     CheckoutAPIView,
     OrderDispatchView,
     OrderTrackingView,
     PaymentSuccessRedirectView,
-    CartAPIView,
-    CartItemAddAPIView,
-    CartItemDetailAPIView,
 )
 
 app_name = "orders"
