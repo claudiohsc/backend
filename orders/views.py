@@ -4,6 +4,7 @@ import logging
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import Sum
+from django.http import Http404
 from django.utils import timezone
 from drf_spectacular.utils import (
     OpenApiParameter,
@@ -28,7 +29,6 @@ from .correios import (
 )
 from .models import (
     Cart,
-    CartItem,
     CustomerOrder,
     OrderItem,
     OrderStatus,
@@ -52,6 +52,7 @@ from .services import (
     get_cart_data,
     remove_item_from_cart,
     update_item_quantity,
+    update_status,
 )
 
 User = get_user_model()
@@ -491,6 +492,12 @@ class PaymentSuccessRedirectView(APIView):
 class OrderTrackingView(APIView):
     permission_classes = [IsAuthenticated]
 
+    def get_permissions(self):
+        # PATCH must be restricted to admin users
+        if self.request.method == "PATCH":
+            return [IsStaffOrSuperUser()]
+        return [IsAuthenticated()]
+
     @extend_schema(
         summary="Rastreio do Pedido via Correios",
         description=(
@@ -517,16 +524,20 @@ class OrderTrackingView(APIView):
         try:
             tracking_data = get_order_tracking_data(order.tracking_code)
             return Response(tracking_data, status=status.HTTP_200_OK)
-        except (
-            CorreiosAuthenticationError,
-            CorreiosTrackingUnavailableError,
-            Exception,
-        ):
-            logger.exception(
-                "Falha ao consultar rastreio dos Correios para o pedido %s", order_id
+        except (CorreiosAuthenticationError, CorreiosTrackingUnavailableError) as e:
+            logger.warning(
+                "Falha conhecida nos Correios para o pedido %s: %s", order_id, e
             )
             return Response(
                 {"message": "Serviço de rastreio temporariamente indisponível."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except Exception:
+            logger.exception(
+                "Erro inesperado ao consultar rastreio para pedido %s", order_id
+            )
+            return Response(
+                {"message": "Erro interno ao processar rastreio."},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
@@ -556,14 +567,6 @@ class OrderTrackingView(APIView):
         },
     )
     def patch(self, request, order_id):
-        if not (request.user.is_staff or request.user.is_superuser):
-            return Response(
-                {
-                    "message": "Apenas administradores podem registrar códigos de rastreio."
-                },
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
         order = CustomerOrder.objects.filter(id=order_id).first()
         if order is None:
             return Response(
@@ -587,9 +590,13 @@ class OrderTrackingView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        order.tracking_code = tracking_code
-        order.status = OrderStatus.SHIPPED
-        order.save(update_fields=["tracking_code", "status", "updated_at"])
+        update_status(
+            order=order,
+            new_status=OrderStatus.SHIPPED,
+            changed_by=request.user,
+            tracking_code=tracking_code,
+            comment="Código de rastreio registado.",
+        )
 
         return Response(
             {
@@ -608,7 +615,7 @@ class OrderTrackingView(APIView):
 
 
 class OrderDispatchView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsStaffOrSuperUser]
 
     @extend_schema(
         summary="Despachar Pedido via Pré-Postagem Correios (Admin)",
@@ -627,12 +634,6 @@ class OrderDispatchView(APIView):
         },
     )
     def post(self, request, order_id):
-        if not (request.user.is_staff or request.user.is_superuser):
-            return Response(
-                {"message": "Apenas administradores podem despachar pedidos."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
         order = (
             CustomerOrder.objects.select_related("user", "user__profile")
             .filter(id=order_id)
@@ -659,9 +660,25 @@ class OrderDispatchView(APIView):
 
         try:
             tracking_code = dispatch_order_and_get_tracking_code(order)
-        except (CorreiosAuthenticationError, CorreiosPrePostagemError, Exception):
+        except (CorreiosAuthenticationError, CorreiosPrePostagemError) as e:
+            logger.warning(
+                "Falha conhecida nos Correios ao criar pré-postagem para pedido %s: %s",
+                order_id,
+                e,
+            )
+            return Response(
+                {
+                    "message": (
+                        "Falha ao registrar envio nos Correios. "
+                        "Tente novamente ou registre o código manualmente."
+                    )
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except Exception:
             logger.exception(
-                "Falha ao criar pré-postagem nos Correios para o pedido %s", order_id
+                "Falha ao criar pré-postagem nos Correios para o pedido %s",
+                order_id,
             )
             return Response(
                 {
@@ -673,9 +690,13 @@ class OrderDispatchView(APIView):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
-        order.tracking_code = tracking_code
-        order.status = OrderStatus.SHIPPED
-        order.save(update_fields=["tracking_code", "status", "updated_at"])
+        update_status(
+            order=order,
+            new_status=OrderStatus.SHIPPED,
+            changed_by=request.user,
+            tracking_code=tracking_code,
+            comment="Despacho automático via pré-postagem Correios.",
+        )
 
         return Response(
             {
@@ -781,7 +802,7 @@ class CartItemDetailAPIView(APIView):
             update_item_quantity(request, variation_id, quantity)
         except ValueError as e:
             return Response({"message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        except (KeyError, CartItem.DoesNotExist):
+        except (KeyError, Http404):
             return Response(
                 {"detail": "Item não encontrado no carrinho."},
                 status=status.HTTP_404_NOT_FOUND,
@@ -807,7 +828,7 @@ class CartItemDetailAPIView(APIView):
     def delete(self, request, variation_id):
         try:
             remove_item_from_cart(request, variation_id)
-        except (KeyError, CartItem.DoesNotExist):
+        except (KeyError, Http404):
             return Response(
                 {"detail": "Item não encontrado no carrinho."},
                 status=status.HTTP_404_NOT_FOUND,

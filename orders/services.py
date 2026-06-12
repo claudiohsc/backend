@@ -1,10 +1,19 @@
 from decimal import Decimal
+from uuid import UUID
 
 import requests
 from django.conf import settings
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 
-from orders.models import Cart, CartItem, OrderStatus, Payment, PaymentStatus
+from orders.models import (
+    Cart,
+    CartItem,
+    OrderStatus,
+    OrderStatusLog,
+    Payment,
+    PaymentStatus,
+)
 from products.models import ProductVariation
 
 
@@ -189,28 +198,33 @@ def get_cart_data(request):
 
 
 def add_item_to_cart(request, variation_id, quantity):
-    variation = get_object_or_404(
-        ProductVariation.objects.select_related("product"), id=variation_id
-    )
-
     if request.user.is_authenticated:
-        cart = get_or_create_user_cart(request.user)
-        cart_item, _ = CartItem.objects.get_or_create(
-            cart=cart,
-            variation=variation,
-            defaults={"quantity": 0, "unit_price": variation.product.base_price},
-        )
-
-        new_quantity = cart_item.quantity + quantity
-        if new_quantity > variation.stock_quantity:
-            raise ValueError(
-                f"Estoque insuficiente para {variation.product.name}. Disponível: {variation.stock_quantity}"
+        with transaction.atomic():
+            variation = get_object_or_404(
+                ProductVariation.objects.select_for_update().select_related("product"),
+                id=variation_id,
             )
 
-        cart_item.quantity = new_quantity
-        cart_item.unit_price = variation.product.base_price
-        cart_item.save()
+            cart = get_or_create_user_cart(request.user)
+            cart_item, _ = CartItem.objects.get_or_create(
+                cart=cart,
+                variation=variation,
+                defaults={"quantity": 0, "unit_price": variation.product.base_price},
+            )
+
+            new_quantity = cart_item.quantity + quantity
+            if new_quantity > variation.stock_quantity:
+                raise ValueError(
+                    f"Estoque insuficiente para {variation.product.name}. Disponível: {variation.stock_quantity}"
+                )
+
+            cart_item.quantity = new_quantity
+            cart_item.unit_price = variation.product.base_price
+            cart_item.save()
     else:
+        variation = get_object_or_404(
+            ProductVariation.objects.select_related("product"), id=variation_id
+        )
         session_cart = request.session.get("cart", {})
         var_id_str = str(variation.id)
 
@@ -290,33 +304,90 @@ def merge_session_cart_to_db(request, user):
     session_cart = request.session.get("cart", {})
     if not session_cart:
         return
+    with transaction.atomic():
+        db_cart = get_or_create_user_cart(user)
+        variation_ids = list(session_cart.keys())
+        # Filter only valid UUIDs to avoid ValidationError on UUIDField
+        valid_ids = []
+        for vid in variation_ids:
+            try:
+                valid_ids.append(UUID(str(vid)))
+            except Exception:
+                continue
 
-    db_cart = get_or_create_user_cart(user)
-    variation_ids = list(session_cart.keys())
-    variations = ProductVariation.objects.filter(id__in=variation_ids).select_related(
-        "product"
+        if valid_ids:
+            variations = (
+                ProductVariation.objects.select_for_update()
+                .filter(id__in=valid_ids)
+                .select_related("product")
+            )
+        else:
+            variations = ProductVariation.objects.none()
+        variations_by_id = {str(v.id): v for v in variations}
+
+        for var_id_str, item_data in session_cart.items():
+            variation = variations_by_id.get(var_id_str)
+            if not variation:
+                continue
+
+            quantity = item_data.get("quantity", 0)
+            cart_item, _ = CartItem.objects.get_or_create(
+                cart=db_cart,
+                variation=variation,
+                defaults={"quantity": 0, "unit_price": variation.product.base_price},
+            )
+
+            new_quantity = cart_item.quantity + quantity
+            if new_quantity > variation.stock_quantity:
+                new_quantity = variation.stock_quantity
+
+            cart_item.quantity = new_quantity
+            cart_item.unit_price = variation.product.base_price
+            cart_item.save()
+
+        request.session.pop("cart", None)
+        request.session.modified = True
+        try:
+            request.session.save()
+        except Exception:
+            # In some contexts session backend may not support save here;
+            # ensure modified flag is set so caller can persist if needed.
+            pass
+
+
+def update_status(order, new_status, changed_by=None, tracking_code=None, comment=None):
+    """Centraliza a atualização de status de pedidos e cria um log histórico.
+
+    Args:
+        order: CustomerOrder instance
+        new_status: OrderStatus value
+        changed_by: User who made the change (optional)
+        tracking_code: optional tracking code to save
+        comment: optional comment/observation
+    """
+    previous_status = order.status
+
+    if tracking_code:
+        order.tracking_code = tracking_code
+
+    order.status = new_status
+    order.save(update_fields=["tracking_code", "status", "updated_at"])
+
+    try:
+        payment = order.payment
+    except Exception:
+        payment = None
+
+    if new_status == OrderStatus.CANCELED and payment:
+        if payment.status != PaymentStatus.PAID:
+            payment.status = PaymentStatus.FAILED
+            payment.save()
+
+    OrderStatusLog.objects.create(
+        order=order,
+        changed_by=changed_by,
+        previous_status=previous_status,
+        new_status=new_status,
+        tracking_code=tracking_code,
+        comment=comment,
     )
-    variations_by_id = {str(v.id): v for v in variations}
-
-    for var_id_str, item_data in session_cart.items():
-        variation = variations_by_id.get(var_id_str)
-        if not variation:
-            continue
-
-        quantity = item_data.get("quantity", 0)
-        cart_item, _ = CartItem.objects.get_or_create(
-            cart=db_cart,
-            variation=variation,
-            defaults={"quantity": 0, "unit_price": variation.product.base_price},
-        )
-
-        new_quantity = cart_item.quantity + quantity
-        if new_quantity > variation.stock_quantity:
-            new_quantity = variation.stock_quantity
-
-        cart_item.quantity = new_quantity
-        cart_item.unit_price = variation.product.base_price
-        cart_item.save()
-
-    request.session.pop("cart", None)
-    request.session.modified = True

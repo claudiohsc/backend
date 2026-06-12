@@ -1,4 +1,3 @@
-import base64
 import logging
 from datetime import datetime
 
@@ -35,12 +34,6 @@ class CorreiosPrePostagemError(Exception):
     pass
 
 
-def build_basic_auth_header(username: str, password: str) -> str:
-    credentials = f"{username}:{password}"
-    encoded_credentials = base64.b64encode(credentials.encode()).decode()
-    return f"Basic {encoded_credentials}"
-
-
 def calculate_token_ttl_in_seconds(expires_at_iso: str) -> int:
     expires_at = datetime.fromisoformat(expires_at_iso)
     now = datetime.now(tz=expires_at.tzinfo)
@@ -52,15 +45,14 @@ def request_new_correios_access_token() -> str:
     username = settings.CORREIOS_USERNAME
     password = settings.CORREIOS_PASSWORD
     cartao_postagem = settings.CORREIOS_CARTAO_POSTAGEM
-
-    headers = {
-        "Authorization": build_basic_auth_header(username, password),
-        "Content-Type": "application/json",
-    }
     payload = {"numero": cartao_postagem}
 
+    # requests can send basic auth via `auth` tuple
     response = requests.post(
-        CORREIOS_TOKEN_ENDPOINT, json=payload, headers=headers, timeout=10
+        CORREIOS_TOKEN_ENDPOINT,
+        json=payload,
+        auth=(username, password),
+        timeout=10,
     )
     response.raise_for_status()
 

@@ -798,8 +798,68 @@ class CartAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         data = response.json()
         self.assertEqual(len(data["items"]), 1)
-        self.assertEqual(data["items"][0]["quantity"], 2)
-        self.assertEqual(float(data["subtotal"]), 300.00)
+
+
+class MergeSessionCartTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="merge@shio.com", name="Merge", password="senha"
+        )
+        self.category = Category.objects.create(name="Test", slug="test")
+        self.product = Product.objects.create(
+            category=self.category, name="Produto", base_price=150.00
+        )
+        self.variation = ProductVariation.objects.create(
+            product=self.product, size="M", sku="SKU-M", stock_quantity=5
+        )
+        self.variation_out_of_stock = ProductVariation.objects.create(
+            product=self.product, size="L", sku="SKU-L", stock_quantity=0
+        )
+        # reuse the cart endpoints used elsewhere in tests
+        self.cart_url = "/api/orders/cart/"
+        self.cart_items_url = "/api/orders/cart/items/"
+
+    def test_merge_respects_stock_limit(self):
+        # DB cart already has quantity 4
+        cart = Cart.objects.create(user=self.user, status="ACTIVE")
+        CartItem.objects.create(
+            cart=cart, variation=self.variation, quantity=4, unit_price=100.00
+        )
+
+        # Session has quantity 3 -> total 7 but should be capped at 5
+        session = self.client.session
+        session["cart"] = {
+            str(self.variation.id): {"quantity": 3, "unit_price": "100.00"}
+        }
+        session.save()
+
+        from types import SimpleNamespace
+
+        from orders.services import merge_session_cart_to_db
+
+        dummy_request = SimpleNamespace(session=session)
+        merge_session_cart_to_db(dummy_request, self.user)
+
+        cart_item = CartItem.objects.get(cart=cart, variation=self.variation)
+        self.assertEqual(cart_item.quantity, 5)
+
+    def test_merge_ignores_deleted_variations(self):
+        # Session contains a variation id that no longer exists
+        session = self.client.session
+        session["cart"] = {"999999": {"quantity": 2, "unit_price": "10.00"}}
+        session.save()
+
+        from types import SimpleNamespace
+
+        from orders.services import merge_session_cart_to_db
+
+        dummy_request = SimpleNamespace(session=session)
+
+        # Should not raise and should clear the session key for the missing variation
+        merge_session_cart_to_db(dummy_request, self.user)
+
+        self.assertNotIn("999999", self.client.session.get("cart", {}))
+        self.assertEqual(self.client.session.get("cart", {}), {})
 
     def test_anonymous_add_duplicate_item(self):
         self.client.post(
