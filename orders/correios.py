@@ -9,10 +9,19 @@ from django.core.cache import cache
 logger = logging.getLogger(__name__)
 
 CORREIOS_TOKEN_CACHE_KEY = "correios_access_token"
-CORREIOS_TOKEN_ENDPOINT = "https://api.correios.com.br/token/v1/autentica/cartaopostagem"
-CORREIOS_TRACKING_ENDPOINT = "https://api.correios.com.br/srorastro/v1/objetos/{codigo_objeto}"
-CORREIOS_PREPOSTAGEM_ENDPOINT = "https://api.correios.com.br/prepostagem/v1/prepostagens"
-CORREIOS_PREPOSTAGEM_DETAILS_ENDPOINT = "https://api.correios.com.br/prepostagem/v1/prepostagens/{id}"
+
+# Host base dos Correios. Produção: https://api.correios.com.br
+# Homologação: https://apihom.correios.com.br (definir via CORREIOS_API_BASE_URL).
+CORREIOS_API_BASE_URL = settings.CORREIOS_API_BASE_URL.rstrip("/")
+
+CORREIOS_TOKEN_ENDPOINT = f"{CORREIOS_API_BASE_URL}/token/v1/autentica/cartaopostagem"
+CORREIOS_TRACKING_ENDPOINT = f"{CORREIOS_API_BASE_URL}/srorastro/v1/objetos/{{codigo_objeto}}"
+CORREIOS_PREPOSTAGEM_ENDPOINT = f"{CORREIOS_API_BASE_URL}/prepostagem/v1/prepostagens"
+CORREIOS_PREPOSTAGEM_DETAILS_ENDPOINT = f"{CORREIOS_API_BASE_URL}/prepostagem/v1/prepostagens/{{id}}"
+CORREIOS_CEP_ENDPOINT = f"{CORREIOS_API_BASE_URL}/cep/v1/enderecos/{{cep}}"
+CORREIOS_PRAZO_ENDPOINT = f"{CORREIOS_API_BASE_URL}/prazo/v1/nacional/{{codigo_servico}}"
+CORREIOS_PRECO_ENDPOINT = f"{CORREIOS_API_BASE_URL}/preco/v1/nacional/{{codigo_servico}}"
+CORREIOS_AGENCIA_ENDPOINT = f"{CORREIOS_API_BASE_URL}/agencia/v1/unidades"
 
 
 class CorreiosAuthenticationError(Exception):
@@ -24,6 +33,10 @@ class CorreiosTrackingUnavailableError(Exception):
 
 
 class CorreiosPrePostagemError(Exception):
+    pass
+
+
+class CorreiosCepNotFoundError(Exception):
     pass
 
 
@@ -263,6 +276,161 @@ def create_prepostagem_at_correios(order) -> dict:
         )
 
     return response.json()
+
+
+def fetch_address_data_by_cep(cep: str) -> dict:
+    token = get_valid_correios_access_token()
+    url = CORREIOS_CEP_ENDPOINT.format(cep=cep.replace("-", "").strip())
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+
+    response = requests.get(url, headers=headers, timeout=10)
+
+    if response.status_code == 401:
+        cache.delete(CORREIOS_TOKEN_CACHE_KEY)
+        token = request_new_correios_access_token()
+        headers["Authorization"] = f"Bearer {token}"
+        response = requests.get(url, headers=headers, timeout=10)
+
+    if response.status_code == 404:
+        raise CorreiosCepNotFoundError(f"CEP {cep} não encontrado.")
+
+    response.raise_for_status()
+    return response.json()
+
+
+def format_cep_address_response(raw_data: dict) -> dict:
+    return {
+        "cep": raw_data.get("cep"),
+        "logradouro": raw_data.get("logradouro"),
+        "complemento": raw_data.get("complemento"),
+        "bairro": raw_data.get("bairro"),
+        "cidade": raw_data.get("localidade"),
+        "uf": raw_data.get("uf"),
+    }
+
+
+def fetch_shipping_deadline_by_service_and_ceps(
+    codigo_servico: str, cep_origem: str, cep_destino: str
+) -> dict:
+    token = get_valid_correios_access_token()
+    url = CORREIOS_PRAZO_ENDPOINT.format(codigo_servico=codigo_servico)
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    params = {
+        "cepOrigem": cep_origem.replace("-", ""),
+        "cepDestino": cep_destino.replace("-", ""),
+    }
+
+    response = requests.get(url, headers=headers, params=params, timeout=10)
+
+    if response.status_code == 401:
+        cache.delete(CORREIOS_TOKEN_CACHE_KEY)
+        token = request_new_correios_access_token()
+        headers["Authorization"] = f"Bearer {token}"
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+
+    response.raise_for_status()
+    return response.json()
+
+
+def fetch_shipping_price_by_service_and_ceps(
+    codigo_servico: str,
+    cep_origem: str,
+    cep_destino: str,
+    peso_gramas: str,
+    comprimento: str = "20",
+    largura: str = "20",
+    altura: str = "20",
+    vl_declarado: str = "0",
+) -> dict:
+    token = get_valid_correios_access_token()
+    url = CORREIOS_PRECO_ENDPOINT.format(codigo_servico=codigo_servico)
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    params = {
+        "cepDestino": cep_destino.replace("-", ""),
+        "cepOrigem": cep_origem.replace("-", ""),
+        "psObjeto": peso_gramas,
+        "tpObjeto": "2",
+        "comprimento": comprimento,
+        "largura": largura,
+        "altura": altura,
+        "vlDeclarado": vl_declarado,
+    }
+
+    response = requests.get(url, headers=headers, params=params, timeout=10)
+
+    if response.status_code == 401:
+        cache.delete(CORREIOS_TOKEN_CACHE_KEY)
+        token = request_new_correios_access_token()
+        headers["Authorization"] = f"Bearer {token}"
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+
+    response.raise_for_status()
+    return response.json()
+
+
+def format_shipping_options_response(prazo_data: dict, preco_data: dict) -> dict:
+    return {
+        "prazo_dias": prazo_data.get("prazoEntrega"),
+        "data_maxima_entrega": prazo_data.get("dataMaxima"),
+        "entrega_domiciliar": prazo_data.get("entregaDomiciliar") == "S",
+        "entrega_sabado": prazo_data.get("entregaSabado") == "S",
+        "preco_final": preco_data.get("pcFinal"),
+        "peso_cobrado": preco_data.get("psCobrado"),
+    }
+
+
+def fetch_agencies_by_city_and_state(
+    municipio: str, uf: str, page: int = 0, size: int = 10
+) -> dict:
+    token = get_valid_correios_access_token()
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    params = {
+        "municipio": municipio,
+        "uf": uf,
+        "status": "2",
+        "page": page,
+        "size": size,
+    }
+
+    response = requests.get(CORREIOS_AGENCIA_ENDPOINT, headers=headers, params=params, timeout=10)
+
+    if response.status_code == 401:
+        cache.delete(CORREIOS_TOKEN_CACHE_KEY)
+        token = request_new_correios_access_token()
+        headers["Authorization"] = f"Bearer {token}"
+        response = requests.get(CORREIOS_AGENCIA_ENDPOINT, headers=headers, params=params, timeout=10)
+
+    response.raise_for_status()
+    return response.json()
+
+
+def format_single_agency(raw_agency: dict) -> dict:
+    endereco = raw_agency.get("endereco", {})
+    horarios = raw_agency.get("horarios", {})
+    return {
+        "nome": raw_agency.get("nome"),
+        "endereco": {
+            "logradouro": endereco.get("logradouro"),
+            "numero": endereco.get("numero"),
+            "bairro": endereco.get("bairro"),
+            "cidade": endereco.get("localidade"),
+            "uf": endereco.get("uf"),
+            "cep": endereco.get("cep"),
+        },
+        "horario_funcionamento": horarios.get("funcionamento"),
+        "inicio_expediente": horarios.get("iniExpediente"),
+        "fim_expediente": horarios.get("fimExpediente"),
+    }
+
+
+def format_agencies_list_response(raw_data: dict) -> dict:
+    itens = raw_data.get("itens", [])
+    page_info = raw_data.get("page", {})
+    return {
+        "agencias": [format_single_agency(agency) for agency in itens],
+        "total": page_info.get("totalElements", 0),
+        "paginas": page_info.get("totalPages", 0),
+    }
 
 
 def dispatch_order_and_get_tracking_code(order) -> str:

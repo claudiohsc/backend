@@ -251,7 +251,7 @@ class OrderTrackingViewTests(APITestCase):
         )
 
     def tracking_url(self, order_id):
-        return f"/api/orders/{order_id}/tracking/"
+        return f"/api/orders/correios/{order_id}/tracking/"
 
     @patch("orders.views.get_order_tracking_data")
     def test_cliente_consulta_rastreio_do_proprio_pedido_com_sucesso(self, mock_get_tracking):
@@ -355,7 +355,7 @@ class OrderTrackingCodeAssignmentTests(APITestCase):
         )
 
     def tracking_url(self, order_id):
-        return f"/api/orders/{order_id}/tracking/"
+        return f"/api/orders/correios/{order_id}/tracking/"
 
     def test_admin_registra_codigo_de_rastreio_e_status_muda_para_shipped(self):
         """Admin deve conseguir vincular o código e o status deve mudar para SHIPPED."""
@@ -684,7 +684,7 @@ class OrderDispatchViewTests(APITestCase):
         )
 
     def dispatch_url(self, order_id):
-        return f"/api/orders/{order_id}/despachar/"
+        return f"/api/orders/correios/{order_id}/despachar/"
 
     @patch("orders.views.dispatch_order_and_get_tracking_code")
     def test_admin_despacha_pedido_e_recebe_tracking_code(self, mock_dispatch):
@@ -700,6 +700,12 @@ class OrderDispatchViewTests(APITestCase):
         self.order.refresh_from_db()
         self.assertEqual(self.order.tracking_code, "BR123456789BR")
         self.assertEqual(self.order.status, OrderStatus.SHIPPED)
+
+        from orders.models import OrderStatusLog
+        log = OrderStatusLog.objects.filter(order=self.order).first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.new_status, OrderStatus.SHIPPED)
+        self.assertEqual(log.changed_by, self.admin)
 
     def test_cliente_nao_pode_despachar_pedido(self):
         """Cliente não deve ter permissão para despachar pedidos."""
@@ -748,4 +754,158 @@ class OrderDispatchViewTests(APITestCase):
 
         self.client.force_authenticate(user=self.admin)
         response = self.client.post(self.dispatch_url(self.order.id))
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+
+
+class CepLookupViewTests(APITestCase):
+    def cep_url(self, cep):
+        return f"/api/orders/correios/cep/{cep}/"
+
+    @patch("orders.correios_views.fetch_address_data_by_cep")
+    def test_cep_valido_retorna_endereco(self, mock_fetch):
+        mock_fetch.return_value = {
+            "cep": "71000000",
+            "uf": "DF",
+            "localidade": "Brasília",
+            "logradouro": "Rua Teste",
+            "bairro": "Centro",
+            "complemento": "",
+        }
+
+        response = self.client.get(self.cep_url("71000000"))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(data["cep"], "71000000")
+        self.assertEqual(data["cidade"], "Brasília")
+        self.assertEqual(data["uf"], "DF")
+
+    @patch("orders.correios_views.fetch_address_data_by_cep")
+    def test_cep_com_hifen_e_normalizado_e_consultado(self, mock_fetch):
+        mock_fetch.return_value = {
+            "cep": "71000000",
+            "uf": "DF",
+            "localidade": "Brasília",
+            "logradouro": "Rua Teste",
+            "bairro": "Centro",
+            "complemento": "",
+        }
+
+        response = self.client.get(self.cep_url("71000-000"))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        mock_fetch.assert_called_once_with("71000000")
+
+    def test_cep_com_formato_invalido_retorna_400(self):
+        response = self.client.get(self.cep_url("abc"))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @patch("orders.correios_views.fetch_address_data_by_cep")
+    def test_cep_inexistente_retorna_404(self, mock_fetch):
+        from orders.correios import CorreiosCepNotFoundError
+        mock_fetch.side_effect = CorreiosCepNotFoundError("CEP não encontrado")
+
+        response = self.client.get(self.cep_url("00000000"))
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    @patch("orders.correios_views.fetch_address_data_by_cep")
+    def test_falha_na_api_dos_correios_retorna_503(self, mock_fetch):
+        mock_fetch.side_effect = Exception("Timeout")
+
+        response = self.client.get(self.cep_url("71000000"))
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+
+
+class ShippingOptionsViewTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="frete_user@shio.com", name="Usuario Frete", password="senha_forte_123"
+        )
+        self.url = "/api/orders/correios/frete/"
+
+    @patch("orders.correios_views.fetch_shipping_price_by_service_and_ceps")
+    @patch("orders.correios_views.fetch_shipping_deadline_by_service_and_ceps")
+    def test_calcula_frete_com_sucesso(self, mock_prazo, mock_preco):
+        mock_prazo.return_value = {
+            "prazoEntrega": 3,
+            "dataMaxima": "2026-06-20T23:58:00",
+            "entregaDomiciliar": "S",
+            "entregaSabado": "N",
+        }
+        mock_preco.return_value = {"pcFinal": "19,92", "psCobrado": "300"}
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(self.url, {"cep_destino": "71000000"})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(data["prazo_dias"], 3)
+        self.assertEqual(data["preco_final"], "19,92")
+        self.assertTrue(data["entrega_domiciliar"])
+
+    def test_sem_cep_destino_retorna_400(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_usuario_nao_autenticado_retorna_401(self):
+        response = self.client.get(self.url, {"cep_destino": "71000000"})
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    @patch("orders.correios_views.fetch_shipping_deadline_by_service_and_ceps")
+    def test_falha_na_api_dos_correios_retorna_503(self, mock_prazo):
+        mock_prazo.side_effect = Exception("Timeout")
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(self.url, {"cep_destino": "71000000"})
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+
+
+class AgencySearchViewTests(APITestCase):
+    url = "/api/orders/correios/agencias/"
+
+    @patch("orders.correios_views.fetch_agencies_by_city_and_state")
+    def test_busca_agencias_com_sucesso(self, mock_fetch):
+        mock_fetch.return_value = {
+            "itens": [
+                {
+                    "nome": "AC CENTRAL DE BRASILIA",
+                    "endereco": {
+                        "logradouro": "SBN",
+                        "numero": "SN",
+                        "bairro": "Asa Norte",
+                        "localidade": "Brasília",
+                        "uf": "DF",
+                        "cep": "70002900",
+                    },
+                    "horarios": {
+                        "funcionamento": "SEGUNDA À SEXTA",
+                        "iniExpediente": "09:00",
+                        "fimExpediente": "18:00",
+                    },
+                }
+            ],
+            "page": {"totalElements": 1, "totalPages": 1},
+        }
+
+        response = self.client.get(self.url, {"municipio": "Brasilia", "uf": "DF"})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(len(data["agencias"]), 1)
+        self.assertEqual(data["agencias"][0]["nome"], "AC CENTRAL DE BRASILIA")
+
+    def test_sem_municipio_retorna_400(self):
+        response = self.client.get(self.url, {"uf": "DF"})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_sem_uf_retorna_400(self):
+        response = self.client.get(self.url, {"municipio": "Brasilia"})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @patch("orders.correios_views.fetch_agencies_by_city_and_state")
+    def test_falha_na_api_dos_correios_retorna_503(self, mock_fetch):
+        mock_fetch.side_effect = Exception("Timeout")
+
+        response = self.client.get(self.url, {"municipio": "Brasilia", "uf": "DF"})
         self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)

@@ -480,6 +480,7 @@ class OrderTrackingView(APIView):
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
+        tags=["Correios"],
         summary="Rastreio do Pedido via Correios",
         description=(
             "Consulta o histórico de rastreamento de um pedido via API dos Correios.\n\n"
@@ -513,6 +514,7 @@ class OrderTrackingView(APIView):
             )
 
     @extend_schema(
+        tags=["Correios"],
         summary="Registrar Código de Rastreio (Admin)",
         description=(
             "Vincula um código de rastreio dos Correios a um pedido e atualiza o status para `SHIPPED`.\n\n"
@@ -589,6 +591,7 @@ class OrderDispatchView(APIView):
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
+        tags=["Correios"],
         summary="Despachar Pedido via Pré-Postagem Correios (Admin)",
         description=(
             "Cria automaticamente um objeto postal nos Correios via API de Pré-Postagem, "
@@ -648,6 +651,13 @@ class OrderDispatchView(APIView):
         order.tracking_code = tracking_code
         order.status = OrderStatus.SHIPPED
         order.save(update_fields=["tracking_code", "status", "updated_at"])
+
+        OrderStatusLog.objects.create(
+            order=order,
+            changed_by=request.user,
+            new_status=OrderStatus.SHIPPED,
+            comment=f"Pedido despachado automaticamente via Correios. Código de rastreio: {tracking_code}",
+        )
 
         return Response(
             {

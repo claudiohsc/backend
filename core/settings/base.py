@@ -175,6 +175,9 @@ GOOGLE_CLIENT_ID = config("GOOGLE_CLIENT_ID")
 
 INFINITEPAY_HANDLE = config("INFINITEPAY_HANDLE", default="")
 
+CORREIOS_API_BASE_URL = config(
+    "CORREIOS_API_BASE_URL", default="https://api.correios.com.br"
+)
 CORREIOS_USERNAME = config("CORREIOS_USERNAME", default="")
 CORREIOS_PASSWORD = config("CORREIOS_PASSWORD", default="")
 CORREIOS_CARTAO_POSTAGEM = config("CORREIOS_CARTAO_POSTAGEM", default="")
