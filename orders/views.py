@@ -4,6 +4,7 @@ import logging
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import Sum
+from django.http import Http404
 from django.utils import timezone
 from drf_spectacular.utils import (
     OpenApiParameter,
@@ -35,12 +36,24 @@ from .models import (
     PaymentStatus,
 )
 from .serializers import (
+    CartItemAddSerializer,
+    CartItemUpdateSerializer,
+    CartRepresentationSerializer,
     DashboardLowStockSerializer,
     DashboardRecentOrderSerializer,
     OrderDetailSerializer,
     OrderStatusUpdateSerializer,
 )
-from .services import check_payment_status, create_infinitepay_checkout
+from .services import (
+    add_item_to_cart,
+    check_payment_status,
+    clear_cart,
+    create_infinitepay_checkout,
+    get_cart_data,
+    remove_item_from_cart,
+    update_item_quantity,
+    update_status,
+)
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -479,6 +492,12 @@ class PaymentSuccessRedirectView(APIView):
 class OrderTrackingView(APIView):
     permission_classes = [IsAuthenticated]
 
+    def get_permissions(self):
+        # PATCH must be restricted to admin users
+        if self.request.method == "PATCH":
+            return [IsStaffOrSuperUser()]
+        return [IsAuthenticated()]
+
     @extend_schema(
         tags=["Correios"],
         summary="Rastreio do Pedido via Correios",
@@ -506,10 +525,20 @@ class OrderTrackingView(APIView):
         try:
             tracking_data = get_order_tracking_data(order.tracking_code)
             return Response(tracking_data, status=status.HTTP_200_OK)
-        except (CorreiosAuthenticationError, CorreiosTrackingUnavailableError, Exception):
-            logger.exception("Falha ao consultar rastreio dos Correios para o pedido %s", order_id)
+        except (CorreiosAuthenticationError, CorreiosTrackingUnavailableError) as e:
+            logger.warning(
+                "Falha conhecida nos Correios para o pedido %s: %s", order_id, e
+            )
             return Response(
                 {"message": "Serviço de rastreio temporariamente indisponível."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except Exception:
+            logger.exception(
+                "Erro inesperado ao consultar rastreio para pedido %s", order_id
+            )
+            return Response(
+                {"message": "Erro interno ao processar rastreio."},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
@@ -540,12 +569,6 @@ class OrderTrackingView(APIView):
         },
     )
     def patch(self, request, order_id):
-        if not (request.user.is_staff or request.user.is_superuser):
-            return Response(
-                {"message": "Apenas administradores podem registrar códigos de rastreio."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
         order = CustomerOrder.objects.filter(id=order_id).first()
         if order is None:
             return Response(
@@ -563,13 +586,19 @@ class OrderTrackingView(APIView):
         unshippable_statuses = [OrderStatus.DELIVERED, OrderStatus.CANCELED]
         if order.status in unshippable_statuses:
             return Response(
-                {"message": f"Não é possível registrar rastreio em pedido com status '{order.status}'."},
+                {
+                    "message": f"Não é possível registrar rastreio em pedido com status '{order.status}'."
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        order.tracking_code = tracking_code
-        order.status = OrderStatus.SHIPPED
-        order.save(update_fields=["tracking_code", "status", "updated_at"])
+        update_status(
+            order=order,
+            new_status=OrderStatus.SHIPPED,
+            changed_by=request.user,
+            tracking_code=tracking_code,
+            comment="Código de rastreio registado.",
+        )
 
         return Response(
             {
@@ -588,7 +617,7 @@ class OrderTrackingView(APIView):
 
 
 class OrderDispatchView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsStaffOrSuperUser]
 
     @extend_schema(
         tags=["Correios"],
@@ -599,6 +628,7 @@ class OrderDispatchView(APIView):
             "Restrito a administradores. Use este endpoint em vez do PATCH de rastreio manual "
             "quando quiser que o sistema gere o código automaticamente."
         ),
+        request=None, 
         responses={
             200: OpenApiTypes.OBJECT,
             400: OpenApiTypes.OBJECT,
@@ -608,12 +638,6 @@ class OrderDispatchView(APIView):
         },
     )
     def post(self, request, order_id):
-        if not (request.user.is_staff or request.user.is_superuser):
-            return Response(
-                {"message": "Apenas administradores podem despachar pedidos."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
         order = (
             CustomerOrder.objects.select_related("user", "user__profile")
             .filter(id=order_id)
@@ -625,18 +649,40 @@ class OrderDispatchView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        undispatchable_statuses = [OrderStatus.DELIVERED, OrderStatus.CANCELED, OrderStatus.SHIPPED]
+        undispatchable_statuses = [
+            OrderStatus.DELIVERED,
+            OrderStatus.CANCELED,
+            OrderStatus.SHIPPED,
+        ]
         if order.status in undispatchable_statuses:
             return Response(
-                {"message": f"Pedido com status '{order.status}' não pode ser despachado."},
+                {
+                    "message": f"Pedido com status '{order.status}' não pode ser despachado."
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
             tracking_code = dispatch_order_and_get_tracking_code(order)
-        except (CorreiosAuthenticationError, CorreiosPrePostagemError, Exception):
+        except (CorreiosAuthenticationError, CorreiosPrePostagemError) as e:
+            logger.warning(
+                "Falha conhecida nos Correios ao criar pré-postagem para pedido %s: %s",
+                order_id,
+                e,
+            )
+            return Response(
+                {
+                    "message": (
+                        "Falha ao registrar envio nos Correios. "
+                        "Tente novamente ou registre o código manualmente."
+                    )
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except Exception:
             logger.exception(
-                "Falha ao criar pré-postagem nos Correios para o pedido %s", order_id
+                "Falha ao criar pré-postagem nos Correios para o pedido %s",
+                order_id,
             )
             return Response(
                 {
@@ -648,9 +694,13 @@ class OrderDispatchView(APIView):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
-        order.tracking_code = tracking_code
-        order.status = OrderStatus.SHIPPED
-        order.save(update_fields=["tracking_code", "status", "updated_at"])
+        update_status(
+            order=order,
+            new_status=OrderStatus.SHIPPED,
+            changed_by=request.user,
+            tracking_code=tracking_code,
+            comment="Despacho automático via pré-postagem Correios.",
+        )
 
         OrderStatusLog.objects.create(
             order=order,
@@ -667,4 +717,135 @@ class OrderDispatchView(APIView):
                 "status": order.status,
             },
             status=status.HTTP_200_OK,
+        )
+
+
+class CartAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        tags=["Cart"],
+        summary="Recuperar Carrinho",
+        description="Retorna o carrinho de compras atual do utilizador (autenticado ou anónimo).",
+        responses={200: CartRepresentationSerializer},
+    )
+    def get(self, request):
+        cart_data = get_cart_data(request)
+        serializer = CartRepresentationSerializer(cart_data)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        tags=["Cart"],
+        summary="Limpar Carrinho",
+        description="Remove todos os itens do carrinho de compras.",
+        responses={200: CartRepresentationSerializer},
+    )
+    def delete(self, request):
+        clear_cart(request)
+        cart_data = get_cart_data(request)
+        serializer = CartRepresentationSerializer(cart_data)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class CartItemAddAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        tags=["Cart"],
+        summary="Adicionar Item ao Carrinho",
+        description="Adiciona uma variação de produto ao carrinho. Se já existir, incrementa a quantidade.",
+        request=CartItemAddSerializer,
+        responses={
+            200: CartRepresentationSerializer,
+            400: inline_serializer(
+                name="CartErrorResponse", fields={"message": serializers.CharField()}
+            ),
+            404: inline_serializer(
+                name="CartNotFoundResponse", fields={"detail": serializers.CharField()}
+            ),
+        },
+    )
+    def post(self, request):
+        serializer = CartItemAddSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        variation_id = serializer.validated_data["variation_id"]
+        quantity = serializer.validated_data["quantity"]
+
+        try:
+            add_item_to_cart(request, variation_id, quantity)
+        except ValueError as e:
+            return Response({"message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        cart_data = get_cart_data(request)
+        return Response(
+            CartRepresentationSerializer(cart_data).data, status=status.HTTP_200_OK
+        )
+
+
+class CartItemDetailAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        tags=["Cart"],
+        summary="Atualizar Quantidade do Item",
+        description="Atualiza a quantidade absoluta de um item no carrinho.",
+        request=CartItemUpdateSerializer,
+        responses={
+            200: CartRepresentationSerializer,
+            400: inline_serializer(
+                name="CartUpdateErrorResponse",
+                fields={"message": serializers.CharField()},
+            ),
+            404: inline_serializer(
+                name="CartUpdateNotFoundResponse",
+                fields={"detail": serializers.CharField()},
+            ),
+        },
+    )
+    def patch(self, request, variation_id):
+        serializer = CartItemUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        quantity = serializer.validated_data["quantity"]
+
+        try:
+            update_item_quantity(request, variation_id, quantity)
+        except ValueError as e:
+            return Response({"message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except (KeyError, Http404):
+            return Response(
+                {"detail": "Item não encontrado no carrinho."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        cart_data = get_cart_data(request)
+        return Response(
+            CartRepresentationSerializer(cart_data).data, status=status.HTTP_200_OK
+        )
+
+    @extend_schema(
+        tags=["Cart"],
+        summary="Remover Item do Carrinho",
+        description="Remove um item (variação de produto) do carrinho.",
+        responses={
+            200: CartRepresentationSerializer,
+            404: inline_serializer(
+                name="CartRemoveNotFoundResponse",
+                fields={"detail": serializers.CharField()},
+            ),
+        },
+    )
+    def delete(self, request, variation_id):
+        try:
+            remove_item_from_cart(request, variation_id)
+        except (KeyError, Http404):
+            return Response(
+                {"detail": "Item não encontrado no carrinho."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        cart_data = get_cart_data(request)
+        return Response(
+            CartRepresentationSerializer(cart_data).data, status=status.HTTP_200_OK
         )

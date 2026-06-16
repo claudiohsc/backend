@@ -285,6 +285,10 @@ SPECTACULAR_SETTINGS = {
             "name": "Stock",
             "description": "Movimentações e histórico de estoque por variação.",
         },
+        {
+            "name": "Cart",
+            "description": "Gestão do carrinho de compras para utilizadores autenticados e anônimos.",
+        },
     ],
     # Swagger UI — aparência e comportamento
     "SWAGGER_UI_SETTINGS": {
@@ -303,4 +307,9 @@ SPECTACULAR_SETTINGS = {
     "POSTPROCESSING_HOOKS": [
         "drf_spectacular.hooks.postprocess_schema_enums",
     ],
+    "ENUM_NAME_OVERRIDES": {
+        # 'NomeBonitoNoSwagger': 'caminho.do.seu.app.models.NomeDaClasseDeChoices'
+        "OrderStatusEnum": "orders.models.OrderStatus",
+        # Se tiver outro enum de status dando conflito, adicione aqui embaixo
+    },
 }

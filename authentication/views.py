@@ -16,6 +16,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from authentication.signals import google_login_completed
+
 from .permissions import IsStaffOrSuperUser
 from .serializers import (
     CustomerCRMDetailSerializer,
@@ -183,6 +185,11 @@ class GoogleLoginView(APIView):
                 {"error": "Erro interno no servidor. Tente novamente."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+        try:
+            google_login_completed.send(sender=None, request=request, user=user)
+        except Exception:
+            logger.exception("Erro ao executar handlers de login (merge de carrinho)")
 
         tokens = get_tokens_for_user(user)
         user_data = UserSerializer(user).data

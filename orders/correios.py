@@ -9,19 +9,14 @@ from django.core.cache import cache
 logger = logging.getLogger(__name__)
 
 CORREIOS_TOKEN_CACHE_KEY = "correios_access_token"
-
-# Host base dos Correios. Produção: https://api.correios.com.br
-# Homologação: https://apihom.correios.com.br (definir via CORREIOS_API_BASE_URL).
-CORREIOS_API_BASE_URL = settings.CORREIOS_API_BASE_URL.rstrip("/")
-
-CORREIOS_TOKEN_ENDPOINT = f"{CORREIOS_API_BASE_URL}/token/v1/autentica/cartaopostagem"
-CORREIOS_TRACKING_ENDPOINT = f"{CORREIOS_API_BASE_URL}/srorastro/v1/objetos/{{codigo_objeto}}"
-CORREIOS_PREPOSTAGEM_ENDPOINT = f"{CORREIOS_API_BASE_URL}/prepostagem/v1/prepostagens"
-CORREIOS_PREPOSTAGEM_DETAILS_ENDPOINT = f"{CORREIOS_API_BASE_URL}/prepostagem/v1/prepostagens/{{id}}"
-CORREIOS_CEP_ENDPOINT = f"{CORREIOS_API_BASE_URL}/cep/v1/enderecos/{{cep}}"
-CORREIOS_PRAZO_ENDPOINT = f"{CORREIOS_API_BASE_URL}/prazo/v1/nacional/{{codigo_servico}}"
-CORREIOS_PRECO_ENDPOINT = f"{CORREIOS_API_BASE_URL}/preco/v1/nacional/{{codigo_servico}}"
-CORREIOS_AGENCIA_ENDPOINT = f"{CORREIOS_API_BASE_URL}/agencia/v1/unidades"
+CORREIOS_TOKEN_ENDPOINT = "https://api.correios.com.br/token/v1/autentica/cartaopostagem"
+CORREIOS_TRACKING_ENDPOINT = "https://api.correios.com.br/srorastro/v1/objetos/{codigo_objeto}"
+CORREIOS_PREPOSTAGEM_ENDPOINT = "https://api.correios.com.br/prepostagem/v1/prepostagens"
+CORREIOS_PREPOSTAGEM_DETAILS_ENDPOINT = "https://api.correios.com.br/prepostagem/v1/prepostagens/{id}"
+CORREIOS_CEP_ENDPOINT = "https://api.correios.com.br/cep/v1/enderecos/{cep}"
+CORREIOS_PRAZO_ENDPOINT = "https://api.correios.com.br/prazo/v1/nacional/{codigo_servico}"
+CORREIOS_PRECO_ENDPOINT = "https://api.correios.com.br/preco/v1/nacional/{codigo_servico}"
+CORREIOS_AGENCIA_ENDPOINT = "https://api.correios.com.br/agencia/v1/unidades"
 
 
 class CorreiosAuthenticationError(Exception):
@@ -57,14 +52,15 @@ def request_new_correios_access_token() -> str:
     username = settings.CORREIOS_USERNAME
     password = settings.CORREIOS_PASSWORD
     cartao_postagem = settings.CORREIOS_CARTAO_POSTAGEM
-
-    headers = {
-        "Authorization": build_basic_auth_header(username, password),
-        "Content-Type": "application/json",
-    }
     payload = {"numero": cartao_postagem}
 
-    response = requests.post(CORREIOS_TOKEN_ENDPOINT, json=payload, headers=headers, timeout=10)
+    # requests can send basic auth via `auth` tuple
+    response = requests.post(
+        CORREIOS_TOKEN_ENDPOINT,
+        json=payload,
+        auth=(username, password),
+        timeout=10,
+    )
     response.raise_for_status()
 
     data = response.json()
@@ -72,7 +68,9 @@ def request_new_correios_access_token() -> str:
     expires_at = data.get("expiraEm")
 
     if not token or not expires_at:
-        raise CorreiosAuthenticationError("Resposta de autenticação dos Correios inválida.")
+        raise CorreiosAuthenticationError(
+            "Resposta de autenticação dos Correios inválida."
+        )
 
     ttl = calculate_token_ttl_in_seconds(expires_at)
     if ttl > 0:
@@ -133,7 +131,9 @@ def format_tracking_events_list(raw_events: list[dict]) -> list[dict]:
     return [format_single_tracking_event(event) for event in raw_events]
 
 
-def build_tracking_response_from_correios_data(tracking_code: str, correios_data: dict) -> dict:
+def build_tracking_response_from_correios_data(
+    tracking_code: str, correios_data: dict
+) -> dict:
     objects = correios_data.get("objetos", [])
     if not objects:
         return build_empty_tracking_response(tracking_code)
@@ -258,13 +258,17 @@ def create_prepostagem_at_correios(order) -> dict:
         "Accept": "application/json",
     }
 
-    response = requests.post(CORREIOS_PREPOSTAGEM_ENDPOINT, json=payload, headers=headers, timeout=15)
+    response = requests.post(
+        CORREIOS_PREPOSTAGEM_ENDPOINT, json=payload, headers=headers, timeout=15
+    )
 
     if response.status_code == 401:
         cache.delete(CORREIOS_TOKEN_CACHE_KEY)
         token = request_new_correios_access_token()
         headers["Authorization"] = f"Bearer {token}"
-        response = requests.post(CORREIOS_PREPOSTAGEM_ENDPOINT, json=payload, headers=headers, timeout=15)
+        response = requests.post(
+            CORREIOS_PREPOSTAGEM_ENDPOINT, json=payload, headers=headers, timeout=15
+        )
 
     if not response.ok:
         try:
