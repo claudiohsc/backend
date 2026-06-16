@@ -1,5 +1,6 @@
 from django.urls import path
 
+from .correios_views import AgencySearchView, CepLookupView, ShippingOptionsView
 from .views import (
     AdminDashboardView,
     AdminOrderDetailView,
@@ -29,13 +30,16 @@ urlpatterns = [
         AdminOrderDetailView.as_view(),
         name="admin_orders_detail",
     ),
+    path("correios/cep/<str:cep>/", CepLookupView.as_view(), name="cep-lookup"),
+    path("correios/frete/", ShippingOptionsView.as_view(), name="shipping-options"),
+    path("correios/agencias/", AgencySearchView.as_view(), name="agency-search"),
     path(
-        "<uuid:order_id>/tracking/",
+        "correios/<uuid:order_id>/tracking/",
         OrderTrackingView.as_view(),
         name="order-tracking",
     ),
     path(
-        "<uuid:order_id>/despachar/",
+        "correios/<uuid:order_id>/despachar/",
         OrderDispatchView.as_view(),
         name="order-dispatch",
     ),
