@@ -1,14 +1,16 @@
+from decouple import Csv, config
+
 import dj_database_url
 
 from .base import *
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="", cast=Csv())
 
 
 # django-cors-headers
 # https://github.com/adamchainz/django-cors-headers
 
-CORS_ALLOWED_ORIGINS = []
+CORS_ALLOWED_ORIGINS = config("CORS_ALLOWED_ORIGINS", default="", cast=Csv())
 # CORS_ALLOW_ALL_ORIGINS = True
 
 # SSL Redirect
@@ -23,7 +25,7 @@ DATABASES = {
     "default": dj_database_url.config(
         conn_max_age=600,
         conn_health_checks=True,
-        ssl_require=True,
+        ssl_require=False,
     ),
 }
 
