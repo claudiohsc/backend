@@ -76,7 +76,17 @@ def driver():
         print("[SELENIUM] Pressione ENTER neste terminal para fechar o navegador...")
         print("="*70)
         try:
+            import time
             input()
+        except OSError:
+            # Stdin capturado pelo pytest (rodando sem o parâmetro -s)
+            print("\n[SELENIUM] Stdin capturado pelo pytest. Mantendo o navegador aberto.")
+            print("[SELENIUM] Pressione Ctrl+C neste terminal para fechar o Chrome...")
+            try:
+                while True:
+                    time.sleep(1)
+            except (KeyboardInterrupt, SystemExit):
+                pass
         except (KeyboardInterrupt, SystemExit, EOFError):
             pass
         chrome_driver.quit()

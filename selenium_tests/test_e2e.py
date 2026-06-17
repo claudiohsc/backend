@@ -243,15 +243,38 @@ def test_product_detail_and_add_to_cart(driver, base_url):
 
 def test_cart_operations(driver, base_url, test_token):
     """
-    Cenário 4: Valida itens no carrinho e altera a quantidade.
-    Caso deslogado, valida apenas o layout da página de carrinho vazio.
+    Cenário 4: Adiciona um produto ao carrinho e somente após isso entra no carrinho
+    para validar as operações do carrinho (incremento de quantidade).
     """
     if test_token:
         inject_auth_token(driver, base_url, test_token)
         
     is_auth = check_logged_in(driver, base_url)
     
-    driver.get(f"{base_url}/cart")
+    # 1. Adiciona um produto de teste primeiro
+    driver.get(f"{base_url}/category/all")
+    wait_for_page(driver, "CategoryPage")
+    
+    click_visible_element(driver, "//article[h3]/a")
+    wait_for_page(driver, "ProductDetailPage")
+    
+    size_options = WebDriverWait(driver, 5).until(
+        EC.presence_of_all_elements_located((By.XPATH, "//button[contains(@class, 'min-w-[80px]') and not(contains(text(), 'esgotado'))]"))
+    )
+    assert len(size_options) > 0, "Sem tamanhos disponíveis para o produto."
+    size_options[0].click()
+    slow_delay(1)
+    
+    # Clica em adicionar ao carrinho
+    click_visible_element(driver, "//button[contains(text(), 'Adicionar ao Carrinho')]")
+    
+    # Aguarda a mensagem de confirmação
+    WebDriverWait(driver, 8).until(
+        EC.visibility_of_element_located((By.XPATH, "//*[contains(text(), 'Adicionado') or contains(text(), 'carrinho')]"))
+    )
+    
+    # 2. Somente após adicionar o produto, entra no carrinho clicando no ícone do header
+    click_visible_element(driver, "//*[@data-testid='cart-link']")
     wait_for_page(driver, "CartPage")
     
     # Se deslogado, valida apenas o layout de carrinho vazio
@@ -260,33 +283,11 @@ def test_cart_operations(driver, base_url, test_token):
             EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'Seu carrinho está vazio')]"))
         )
         assert empty_msg.is_displayed()
-        print("✓ Cenário 4: Layout de carrinho vazio verificado com sucesso (modo deslogado).")
+        print("✓ Cenário 4: Entrou no carrinho após adicionar produto e verificou carrinho vazio (modo deslogado).")
         return
         
     # Se logado, executa operações completas
     items = driver.find_elements(By.XPATH, "//article[contains(@class, 'grid')]")
-    if not items:
-        print("⚠ Carrinho vazio no modo logado. Adicionando item rápido...")
-        driver.get(f"{base_url}/category/all")
-        wait_for_page(driver, "CategoryPage")
-        
-        click_visible_element(driver, "//article[h3]/a")
-        
-        wait_for_page(driver, "ProductDetailPage")
-        size_options = WebDriverWait(driver, 5).until(
-            EC.presence_of_all_elements_located((By.XPATH, "//button[contains(@class, 'min-w-[80px]') and not(contains(text(), 'esgotado'))]"))
-        )
-        if size_options:
-            size_options[0].click()
-            
-        click_visible_element(driver, "//button[contains(text(), 'Adicionar ao Carrinho')]")
-        WebDriverWait(driver, 8).until(
-            EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'Adicionado')]"))
-        )
-        driver.get(f"{base_url}/cart")
-        wait_for_page(driver, "CartPage")
-        items = driver.find_elements(By.XPATH, "//article[contains(@class, 'grid')]")
-        
     assert len(items) > 0, "O carrinho deveria conter pelo menos um item no modo autenticado."
     
     # Incrementa a quantidade no carrinho
