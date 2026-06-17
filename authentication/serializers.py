@@ -8,6 +8,13 @@ from .models import User
 class UserSerializer(serializers.ModelSerializer):
     """Serializer completo do utilizador para respostas da API."""
 
+    phone_number = serializers.CharField(
+        source="profile.phone_number", allow_blank=True, allow_null=True, required=False
+    )
+    cpf = serializers.CharField(
+        source="profile.cpf", allow_blank=True, allow_null=True, required=False
+    )
+
     class Meta:
         model = User
         fields = [
@@ -16,10 +23,12 @@ class UserSerializer(serializers.ModelSerializer):
             "name",
             "avatar_url",
             "is_new_user",
+            "phone_number",
+            "cpf",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = fields
+        read_only_fields = ["id", "email", "created_at", "updated_at"]
 
 
 class GoogleAuthSerializer(serializers.Serializer):

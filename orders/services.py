@@ -3,6 +3,7 @@ from uuid import UUID
 
 import requests
 from django.conf import settings
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 
@@ -44,6 +45,13 @@ def create_infinitepay_checkout(order, request):
 
     redirect_url = request.build_absolute_uri("/api/orders/pagamento-sucesso/")
 
+    phone_number = ""
+    try:
+        profile = order.user.profile
+        phone_number = profile.phone_number or ""
+    except ObjectDoesNotExist:
+        phone_number = ""
+
     payload = {
         "handle": settings.INFINITEPAY_HANDLE,
         "redirect_url": redirect_url,
@@ -52,9 +60,7 @@ def create_infinitepay_checkout(order, request):
         "customer": {
             "name": order.user.name,
             "email": order.user.email,
-            "phone_number": getattr(order.user.profile, "phone_number", "")
-            if hasattr(order.user, "profile")
-            else "",
+            "phone_number": phone_number,
         },
         "address": {
             "cep": order.shipping_zip_code,

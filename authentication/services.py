@@ -16,7 +16,7 @@ from django.conf import settings
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 
-from .models import User
+from .models import User, UserProfile
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +177,12 @@ class GoogleAuthService:
             is_new_user=True,
             password=None,
         )
+
+        # Garantir que existe um UserProfile associado ao utilizador criado
+        try:
+            UserProfile.objects.get_or_create(user=user)
+        except Exception:
+            logger.exception("Falha ao criar/obter UserProfile para novo utilizador Google")
 
         logger.info(f"Novo utilizador criado via Google: {email}")
         return user, True

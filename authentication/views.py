@@ -376,6 +376,36 @@ class MeView(APIView):
         serializer = UserSerializer(request.user)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    def patch(self, request):
+        user = request.user
+        serializer = UserSerializer(user, data=request.data, partial=True)
+
+        if not serializer.is_valid():
+            return Response(
+                {"error": "Dados inválidos.", "details": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Salva campos do User (nome, avatar_url, is_new_user etc.)
+        serializer.save()
+
+        # Atualiza/Cria campos do UserProfile (phone_number, cpf) manualmente
+        profile_updates = {}
+        if "phone_number" in request.data:
+            profile_updates["phone_number"] = request.data.get("phone_number")
+        if "cpf" in request.data:
+            profile_updates["cpf"] = request.data.get("cpf")
+
+        if profile_updates:
+            from .models import UserProfile
+
+            profile, _ = UserProfile.objects.get_or_create(user=user)
+            for key, val in profile_updates.items():
+                setattr(profile, key, val)
+            profile.save()
+
+        return Response(UserSerializer(user).data, status=status.HTTP_200_OK)
+
 
 class CustomerCRMViewSet(viewsets.ReadOnlyModelViewSet):
     """UC07 – Gerenciar Clientes (CRM)"""

@@ -194,8 +194,12 @@ def build_remetente_data_from_settings() -> dict:
 def build_destinatario_data_from_order(order) -> dict:
     user = order.user
     cpf_cnpj = ""
-    if hasattr(user, "profile") and user.profile and user.profile.cpf:
-        cpf_cnpj = user.profile.cpf
+    try:
+        profile = user.profile
+        if profile and profile.cpf:
+            cpf_cnpj = profile.cpf
+    except ObjectDoesNotExist:
+        cpf_cnpj = ""
 
     return {
         "nome": user.name,
