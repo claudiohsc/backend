@@ -704,8 +704,8 @@ class ProductCreateTests(APITestCase):
                 "description": "Algodão",
                 "base_price": "120.00",
                 "variations": [
-                    {"size": "P", "sku": "CAM-P", "stock_quantity": 10},
-                    {"size": "M", "sku": "CAM-M", "stock_quantity": 5},
+                    {"size": "P", "color": "Azul", "sku": "CAM-P", "stock_quantity": 10},
+                    {"size": "M", "color": "Vermelho", "sku": "CAM-M", "stock_quantity": 5},
                 ],
             },
             format="json",
@@ -713,6 +713,9 @@ class ProductCreateTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(len(response.json()["variations"]), 2)
+        variations = response.json()["variations"]
+        self.assertEqual(variations[0]["color"], "Azul")
+        self.assertEqual(variations[1]["color"], "Vermelho")
 
     def test_base_price_negativo_400(self):
         response = self.client.post(
@@ -868,6 +871,37 @@ class VariationCRUDTests(APITestCase):
             **auth_header(self.customer),
         )
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_admin_cria_variacao_com_cor(self):
+        response = self.client.post(
+            self.create_url,
+            {"size": "M", "color": "Azul", "sku": "V-M-AZUL", "stock_quantity": 5},
+            format="json",
+            **auth_header(self.admin),
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(self.product.variations.count(), 2)
+        v = ProductVariation.objects.get(sku="V-M-AZUL")
+        self.assertEqual(v.color, "Azul")
+        self.assertEqual(response.json()["color"], "Azul")
+
+    def test_admin_atualiza_cor_variacao(self):
+        response = self.client.put(
+            self.detail_url,
+            {"size": "P", "color": "Preto", "sku": "V-P-PRETO", "stock_quantity": 10},
+            format="json",
+            **auth_header(self.admin),
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.variation.refresh_from_db()
+        self.assertEqual(self.variation.color, "Preto")
+        self.assertEqual(response.json()["color"], "Preto")
+
+    def test_variation_str_representation(self):
+        self.assertEqual(str(self.variation), f"{self.product.name} - P")
+        self.variation.color = "Verde"
+        self.variation.save()
+        self.assertEqual(str(self.variation), f"{self.product.name} - P / Verde")
 
 
 # ─── Image — Persist / Delete ─────────────────────────────────────────────────

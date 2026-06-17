@@ -85,12 +85,15 @@ class ProductVariation(models.Model):
         Product, on_delete=models.CASCADE, related_name="variations"
     )
     size = models.CharField(max_length=50)
+    color = models.CharField(max_length=100, default="", blank=True)
     sku = models.CharField(max_length=100, unique=True)
     stock_quantity = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
+        if self.color:
+            return f"{self.product.name} - {self.size} / {self.color}"
         return f"{self.product.name} - {self.size}"
 
 

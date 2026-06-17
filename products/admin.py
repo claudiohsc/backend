@@ -13,7 +13,7 @@ from .models import (
 class ProductVariationInline(admin.TabularInline):
     model = ProductVariation
     extra = 1
-    fields = ("size", "sku", "stock_quantity")
+    fields = ("size", "color", "sku", "stock_quantity")
 
 
 class ProductImageInline(admin.TabularInline):
@@ -33,9 +33,9 @@ class ProductAdmin(admin.ModelAdmin):
 
 @admin.register(ProductVariation)
 class ProductVariationAdmin(admin.ModelAdmin):
-    list_display = ("product", "size", "sku", "stock_quantity")
+    list_display = ("product", "size", "color", "sku", "stock_quantity")
     search_fields = ("sku", "product__name")
-    list_filter = ("size",)
+    list_filter = ("size", "color")
 
 
 @admin.register(ProductImage)
