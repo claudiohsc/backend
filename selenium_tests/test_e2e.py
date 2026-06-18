@@ -26,12 +26,16 @@ def wait_for_page(driver, page_name, timeout=10):
 
 def find_visible_element(driver, xpath, timeout=10):
     """Aguarda e retorna o primeiro elemento correspondente ao XPath que esteja visível."""
+    from selenium.common.exceptions import StaleElementReferenceException
     end_time = time.time() + timeout
     while time.time() < end_time:
-        elements = driver.find_elements(By.XPATH, xpath)
-        for el in elements:
-            if el.is_displayed():
-                return el
+        try:
+            elements = driver.find_elements(By.XPATH, xpath)
+            for el in elements:
+                if el.is_displayed():
+                    return el
+        except StaleElementReferenceException:
+            pass
         time.sleep(0.5)
     raise TimeoutError(f"Elemento visível para o XPath '{xpath}' não foi encontrado dentro de {timeout}s.")
 
@@ -39,27 +43,43 @@ def click_visible_element(driver, xpath, timeout=10):
     """
     Localiza o elemento visível, rola a página suavemente até ele, 
     destaca-o com uma borda vermelha e clica.
+    Suporta retentativas caso o elemento fique stale durante a interação.
     """
-    el = find_visible_element(driver, xpath, timeout)
+    from selenium.common.exceptions import StaleElementReferenceException
     
-    # 1. Rolar suavemente até o centro da tela para visualização do professor
-    driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", el)
-    slow_delay(1.0)
-    
-    # 2. Destacar o elemento com uma borda vermelha e fundo rosa translúcido
-    original_style = el.get_attribute("style")
-    driver.execute_script(
-        "arguments[0].setAttribute('style', 'border: 3px solid #ff3333; background-color: rgba(255, 51, 51, 0.15); box-shadow: 0 0 10px #ff3333;');", 
-        el
-    )
-    slow_delay(2.0) # Tempo maior para o professor observar a seleção
-    
-    # 3. Restaurar o estilo original e clicar
-    driver.execute_script("arguments[0].setAttribute('style', arguments[1]);", el, original_style)
-    WebDriverWait(driver, 5).until(EC.element_to_be_clickable(el))
+    end_time = time.time() + timeout
+    while time.time() < end_time:
+        try:
+            # Calcula o tempo restante para a busca
+            remaining_time = max(1.0, end_time - time.time())
+            el = find_visible_element(driver, xpath, timeout=remaining_time)
+            
+            # 1. Rolar suavemente até o centro da tela para visualização do professor
+            driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", el)
+            slow_delay(1.0)
+            
+            # 2. Destacar o elemento com uma borda vermelha e fundo rosa translúcido
+            original_style = el.get_attribute("style")
+            driver.execute_script(
+                "arguments[0].setAttribute('style', 'border: 3px solid #ff3333; background-color: rgba(255, 51, 51, 0.15); box-shadow: 0 0 10px #ff3333;');", 
+                el
+            )
+            slow_delay(2.0) # Tempo maior para o professor observar a seleção
+            
+            # 3. Restaurar o estilo original e clicar
+            driver.execute_script("arguments[0].setAttribute('style', arguments[1]);", el, original_style)
+            WebDriverWait(driver, 5).until(EC.element_to_be_clickable(el))
+            el.click()
+            
+            slow_delay(0.2)
+            return el
+        except StaleElementReferenceException:
+            print(f"[Selenium] Elemento stale detectado para '{xpath}'. Tentando novamente...")
+            time.sleep(0.5)
+            
+    # Última tentativa direta sem captura se estourar o timeout
+    el = find_visible_element(driver, xpath, timeout=2)
     el.click()
-    
-    slow_delay(0.2)
     return el
 
 def type_text_slowly(driver, element, text):
@@ -111,6 +131,25 @@ def check_logged_in(driver, base_url):
     except Exception:
         return False
 
+def navigate_via_click(driver, click_xpath, target_page_name, timeout=12):
+    """
+    Clica no elemento e aguarda a página correspondente carregar.
+    Caso o clique falhe ou seja engolido devido a re-renderizações rápidas do React,
+    tenta localizar e clicar novamente no elemento até o fim do timeout.
+    """
+    end_time = time.time() + timeout
+    while time.time() < end_time:
+        try:
+            click_visible_element(driver, click_xpath, timeout=5)
+            wait_for_page(driver, target_page_name, timeout=4)
+            return
+        except Exception:
+            print(f"[Selenium] Navegação temporária para '{target_page_name}' falhou. Retentando...")
+            time.sleep(0.5)
+    # Última tentativa para disparar exceção em caso de falha permanente
+    click_visible_element(driver, click_xpath, timeout=2)
+    wait_for_page(driver, target_page_name, timeout=5)
+
 # ─── Test Cases ───────────────────────────────────────────────────────────────
 
 def test_homepage_and_navigation(driver, base_url):
@@ -123,15 +162,11 @@ def test_homepage_and_navigation(driver, base_url):
     assert logo.is_displayed()
     slow_delay(1)
     
-    # 2. Clica no link "Produtos" do menu
-    click_visible_element(driver, "//nav//a[contains(text(), 'Produtos')]")
-    
-    # Valida carregamento da página de listagem
-    wait_for_page(driver, "CategoryPage")
+    # 2. Clica no link "Produtos" do menu e valida listagem
+    navigate_via_click(driver, "//nav//a[contains(text(), 'Produtos')]", "CategoryPage")
     
     # 3. Clica no logo para retornar à Home
-    click_visible_element(driver, "//img[@alt='Shio Logo']")
-    wait_for_page(driver, "HomePage")
+    navigate_via_click(driver, "//img[@alt='Shio Logo']", "HomePage")
     print("✓ Cenário 1: Homepage e navegação básica executados com sucesso!")
 
 
@@ -181,10 +216,7 @@ def test_product_detail_and_add_to_cart(driver, base_url):
     wait_for_page(driver, "CategoryPage")
     
     # 1. Encontra e clica no primeiro card de produto visível
-    click_visible_element(driver, "//article[h3]/a")
-    
-    # Valida página de detalhe
-    wait_for_page(driver, "ProductDetailPage")
+    navigate_via_click(driver, "//article[h3]/a", "ProductDetailPage")
     
     # 2. Seleciona o primeiro tamanho disponível (que não esteja esgotado)
     size_options = WebDriverWait(driver, 5).until(
@@ -218,7 +250,7 @@ def test_product_detail_and_add_to_cart(driver, base_url):
         print("⚠ Seletor de cores não está presente na página de detalhes do produto (comportamento tolerado).")
         
     # 4. Aumenta a quantidade clicando no botão '+'
-    click_visible_element(driver, "//button[text()='+']")
+    click_visible_element(driver, "(//div[contains(@class, 'bg-[#f0f0f0]')]//button)[2]")
     
     # 5. Adiciona ao carrinho
     click_visible_element(driver, "//button[contains(text(), 'Adicionar ao Carrinho')]")
@@ -236,8 +268,7 @@ def test_product_detail_and_add_to_cart(driver, base_url):
         raise e
 
     # 7. Entrar no Carrinho clicando no ícone do header (Requisito: "entre no carrinho")
-    click_visible_element(driver, "//*[@data-testid='cart-link']")
-    wait_for_page(driver, "CartPage")
+    navigate_via_click(driver, "//*[@data-testid='cart-link']", "CartPage")
     print("✓ Cenário 3: Entrou no carrinho clicando no ícone do header com sucesso!")
 
 
@@ -255,8 +286,7 @@ def test_cart_operations(driver, base_url, test_token):
     driver.get(f"{base_url}/category/all")
     wait_for_page(driver, "CategoryPage")
     
-    click_visible_element(driver, "//article[h3]/a")
-    wait_for_page(driver, "ProductDetailPage")
+    navigate_via_click(driver, "//article[h3]/a", "ProductDetailPage")
     
     size_options = WebDriverWait(driver, 5).until(
         EC.presence_of_all_elements_located((By.XPATH, "//button[contains(@class, 'min-w-[80px]') and not(contains(text(), 'esgotado'))]"))
@@ -274,8 +304,7 @@ def test_cart_operations(driver, base_url, test_token):
     )
     
     # 2. Somente após adicionar o produto, entra no carrinho clicando no ícone do header
-    click_visible_element(driver, "//*[@data-testid='cart-link']")
-    wait_for_page(driver, "CartPage")
+    navigate_via_click(driver, "//*[@data-testid='cart-link']", "CartPage")
     
     # Se deslogado, valida apenas o layout de carrinho vazio
     if not is_auth:
@@ -291,7 +320,7 @@ def test_cart_operations(driver, base_url, test_token):
     assert len(items) > 0, "O carrinho deveria conter pelo menos um item no modo autenticado."
     
     # Incrementa a quantidade no carrinho
-    click_visible_element(driver, "//button[text()='+']")
+    click_visible_element(driver, "(//div[contains(@class, 'bg-[#f0f0f0]')]//button)[2]")
     slow_delay(2) # Espera o recalculo via API do subtotal
     
     print("✓ Cenário 4: Item no carrinho verificado e quantidade incrementada (modo logado)!")
@@ -404,32 +433,27 @@ def test_my_account_pages(driver, base_url, test_token):
     driver.get(base_url)
     wait_for_page(driver, "HomePage")
     
-    click_visible_element(driver, "//*[@data-testid='my-account-link']")
-    wait_for_page(driver, "MyAccountPage")
+    navigate_via_click(driver, "//*[@data-testid='my-account-link']", "MyAccountPage")
     slow_delay(2)
     
     # Navega para Meus Pedidos
     print("Navegando para Meus Pedidos...")
-    click_visible_element(driver, "//aside//a[contains(., 'Meus Pedidos')]")
-    wait_for_page(driver, "MyOrdersPage")
+    navigate_via_click(driver, "//aside//a[contains(., 'Meus Pedidos')]", "MyOrdersPage")
     slow_delay(2)
     
     # Navega para Endereços
     print("Navegando para Endereços...")
-    click_visible_element(driver, "//aside//a[contains(., 'Endereços')]")
-    wait_for_page(driver, "AddressesPage")
+    navigate_via_click(driver, "//aside//a[contains(., 'Endereços')]", "AddressesPage")
     slow_delay(2)
     
     # Entra na página de criar Novo Endereço (todas as páginas de dentro de minha conta)
     print("Navegando para Novo Endereço...")
-    click_visible_element(driver, "//a[contains(text(), 'Novo endereco')]")
-    wait_for_page(driver, "NewAddressPage")
+    navigate_via_click(driver, "//a[contains(text(), 'Novo endereco')]", "NewAddressPage")
     slow_delay(2)
     
     # Retorna para Meus Dados
     print("Navegando de volta para Meus Dados...")
-    click_visible_element(driver, "//aside//a[contains(., 'Meus Dados')]")
-    wait_for_page(driver, "MyAccountPage")
+    navigate_via_click(driver, "//aside//a[contains(., 'Meus Dados')]", "MyAccountPage")
     slow_delay(2)
     
     print("✓ Cenário 6: Navegação completa por todas as abas e páginas internas da conta realizada com sucesso!")

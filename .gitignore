@@ -211,3 +211,4 @@ secret.json
 schema.yml
 mediafiles/*
 !mediafiles/.gitkeep
+**/chrome_profile_teste/

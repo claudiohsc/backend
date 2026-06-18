@@ -75,7 +75,7 @@ Crie um arquivo `.env` na pasta `selenium_tests/` e configure o caminho do seu p
 
 * **No macOS:**
   ```env
-  SHIO_CHROME_USER_DATA_DIR=/Users/Claudio1/Library/Application Support/Google/Chrome
+  SHIO_CHROME_USER_DATA_DIR=/Users/[SEU-USER]/Library/Application Support/Google/Chrome
   SHIO_CHROME_PROFILE=Default
   ```
   *(Nota: Se você usa outro perfil além do "Default", mude o valor de `SHIO_CHROME_PROFILE` para "Profile 1", "Profile 2", etc.)*
@@ -93,7 +93,14 @@ Crie um arquivo `.env` na pasta `selenium_tests/` e configure o caminho do seu p
   ```
 
 > [!CAUTION]
-> **Importante:** Se você escolher essa opção, **feche todas as janelas do seu Chrome comum** antes de rodar os testes. Caso contrário, o Chrome bloqueará o acesso do Selenium à pasta de dados por segurança.
+> **Importante:** Se você escolher usar o seu perfil pessoal diário, **feche completamente todas as janelas do seu Chrome pessoal** antes de rodar os testes. Caso contrário, o Chrome bloqueará o acesso do Selenium por segurança, gerando o erro `SessionNotCreatedException`.
+>
+> **Dica (Para rodar os testes sem fechar o seu Chrome pessoal):** Você pode apontar o perfil para uma pasta nova e dedicada aos testes dentro do próprio projeto! Exemplo no seu arquivo `.env`:
+> ```env
+> SHIO_CHROME_USER_DATA_DIR=backend/selenium_tests/chrome_profile_teste
+> SHIO_CHROME_PROFILE=Default
+> ```
+> Na primeira vez que você rodar os testes com essa configuração, o Chrome abrirá "limpo". Você só precisa fazer o login manualmente uma única vez na loja. Nas execuções seguintes, a sessão estará gravada de forma isolada nesta pasta e você poderá rodar os testes à vontade com a conta logada, sem nunca precisar fechar o seu navegador de uso diário!
 
 ### Opção B: Injetar o Token JWT diretamente (Ideal para CI/CD)
 Se não quiser fechar seu navegador Chrome ou preferir rodar em modo silencioso (`headless`), faça login na loja no seu navegador normal, abra o Console do Desenvolvedor (F12) -> aba **Application/Armazenamento** -> **Local Storage** -> copie o valor correspondente a chave `accessToken`.
