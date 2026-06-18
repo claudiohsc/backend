@@ -56,7 +56,7 @@ def click_visible_element(driver, xpath, timeout=10):
             
             # 1. Rolar suavemente até o centro da tela para visualização do professor
             driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", el)
-            slow_delay(1.0)
+            time.sleep(0.2)
             
             # 2. Destacar o elemento com uma borda vermelha e fundo rosa translúcido
             original_style = el.get_attribute("style")
@@ -64,14 +64,14 @@ def click_visible_element(driver, xpath, timeout=10):
                 "arguments[0].setAttribute('style', 'border: 3px solid #ff3333; background-color: rgba(255, 51, 51, 0.15); box-shadow: 0 0 10px #ff3333;');", 
                 el
             )
-            slow_delay(2.0) # Tempo maior para o professor observar a seleção
+            time.sleep(0.6) # Tempo suficiente para ver a seleção sem demorar muito
             
             # 3. Restaurar o estilo original e clicar
             driver.execute_script("arguments[0].setAttribute('style', arguments[1]);", el, original_style)
             WebDriverWait(driver, 5).until(EC.element_to_be_clickable(el))
             el.click()
             
-            slow_delay(0.2)
+            time.sleep(0.2)
             return el
         except StaleElementReferenceException:
             print(f"[Selenium] Elemento stale detectado para '{xpath}'. Tentando novamente...")
